@@ -1,4 +1,5 @@
 
+
 # irrelevant, redundant or non-public files
 manuscript/
 data/
@@ -9,7 +10,7 @@ shared_with_group/
 *.pdf
 *.docx
 *.csv
-cat >> .gitignore << 'EOF'# History files
+
 .Rhistory
 .Rapp.history
 
@@ -58,6 +59,9 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+<<<<<<< HEAD
 
 
 
+=======
+>>>>>>> 5a28e729beba3543a97c679b11c2ee3aa5efad48
