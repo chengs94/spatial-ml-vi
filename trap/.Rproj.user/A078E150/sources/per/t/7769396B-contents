@@ -1,0 +1,327 @@
+---
+title: "Prediction and variable importance with synthetic data"
+author: "Si Cheng"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data generation
+We choose 5 ``active'' predictors in our mean model, which are
+
+* Distance to A1 road
+* Population density
+* NDVI (annual median, buffer size 1km)
+* Land use - urban (buffer size 15km)
+* Land use - residential (buffer size 15km)
+
+and they do not seem to be highly auto-correlated (despite bimodal / unbalanced distribution):
+
+```{r, warning = FALSE, message = FALSE}
+library(dplyr)
+library(ggplot2)
+library(GGally)
+
+set.seed(3)
+
+plltnt.mat <- read.csv("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/spatialRF/data/Si.txt")
+plltnt.mat <- plltnt.mat[-which(plltnt.mat$native_id=="PHOE5"),]
+# annavg.si <- plltnt.mat[,2]
+X <- plltnt.mat[,c(14:25,27:613)]
+X.active <- X %>% select(m_to_a1, pop_dens, ndvi_q50_a01000,
+                         lu_mix_urban_p15000, lu_resi_p15000)
+
+ggpairs(X.active)
+```
+
+We then generate the data with a non-linear mean model and exponential covariance model, with roughly comparable heterogeneity between them. The mean model is (after properly standardizing/shifting all predictors)
+\[
+  Y_{\text{mean}} = -0.5\cdot\text{Dist to A1} + 0.2\cdot\text{Pop density}^2 - 1\cdot \text{median NDVI} + 0.5\cdot\sqrt{\text{Urban landuse}} + 0.5\cdot\text{Residential landuse} -0.25\cdot\text{Dist to A1}\times\text{Median NDVI}.
+\]
+
+```{r, warning = FALSE}
+grid <- list(lambert_x = plltnt.mat$lambert_x,
+             lambert_y = plltnt.mat$lambert_y)
+coords <- list(x = scale(grid$lambert_x, scale = FALSE) / 1e6, 
+               y = scale(grid$lambert_y, scale = FALSE) / 1e6) # orig unit: meters
+
+X1 = X.active %>% mutate_each(funs(scale)) %>% 
+    mutate(pop_dens = ifelse(pop_dens > 2, 2, pop_dens)) %>%
+    mutate(lu_mix_urban_p15000 = ifelse(lu_mix_urban_p15000 > 3, 3, lu_mix_urban_p15000))
+y.mean = X1$m_to_a1 * (-.4) + (X1$pop_dens - min(X1$pop_dens))^2 * .2 +
+    X1$ndvi_q50_a01000 * (-.8) + 
+    sqrt(X1$lu_mix_urban_p15000 - min(X1$lu_mix_urban_p15000)) * .5 +
+    X1$lu_resi_p15000 * .5 + X1$m_to_a1*X1$ndvi_q50_a01000 * (-.25)
+
+gen.data = function(sig, nug, range){
+  dmat = SpatioTemporal::crossDist(cbind(coords$x, coords$y))
+  cov.mat = sig * exp(-dmat^2/range) # + nug * diag(nrow(X))
+  
+  y.err1 = MASS::mvrnorm(n = 1, mu = rep(0, length(y.mean)), Sigma = cov.mat)
+  y.err2 = rnorm(length(y.mean), 0, nug)
+  return(list(y.sill = y.err1, y.nug = y.err2))
+}
+
+ggplot(data = NULL, aes(x = y.mean)) + geom_histogram() +
+  ggtitle("Mean component of the outcome")
+
+y.err = gen.data(sig = 4, nug = 1, range = 2.5)
+knitr::kable(t(c(var(y.mean), var(y.err$y.sill), var(y.err$y.nug))), col.names = c("Mean", "Partial Sill", "Nugget"),
+             digits = 4, caption = "Variance of each component")
+```
+
+```{r, warning = FALSE, message = FALSE, fig.width=12, fig.height=6}
+library(ggmap)
+library(ggpubr)
+
+load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/spatialRF/syn_rslt_new_corr2.RData")
+latlon = list(longitude = plltnt.mat$longitude, latitude = plltnt.mat$latitude)
+
+make_plot = function(use.residual = FALSE, transformed = c("sqrt", "log", "none"),
+                     y, y.true = NULL, plot.range, coords, plot.title){
+  if (transformed == "sqrt"){
+    y = y^2
+    if (!is.null(y.true)) y.true = y.true^2
+  } else if(transformed == "log"){
+    y = exp(y)
+    if (!is.null(y.true)) y.true = y.true^2
+  }
+  
+  if (use.residual){
+    y = y - y.true
+  }
+  
+  dt = as.data.frame(cbind(y, coords$longitude, coords$latitude))
+  colnames(dt) = c("y", "longitude", "latitude")
+  
+  usMap = get_map(location=c(min(coords$longitude), min(coords$latitude),
+                            max(coords$longitude), max(coords$latitude)),
+                 source="stamen", maptype = "toner", crop=FALSE)
+  #, maptype = "terrain", color = "bw", force = TRUE)
+
+  p = ggmap(usMap) + 
+         geom_jitter(data = dt, 
+                    aes(x = longitude, y = latitude, color = y))
+  
+  if (use.residual){
+    p = p + scale_color_gradient2(name = "", limits = plot.range)
+  } else{
+    p = p + scale_color_viridis_c(option = "cividis", name = "", # trans = "sqrt",
+                                  limits = plot.range) 
+  }
+  
+  p = p + scale_x_continuous(limits = c(min(dt$longitude)-2,
+                                       max(dt$longitude)+2), 
+                            expand = c(0, 0)) +
+      scale_y_continuous(limits = c(min(dt$latitude)-2,
+                                       max(dt$latitude)+2), 
+                            expand = c(0, 0)) +
+      guides(size = FALSE) + ggtitle(plot.title)
+  return(p)
+}
+
+p.all = make_plot(use.residual = FALSE, transformed = "none", 
+                  y = annavg, y.true = NULL, plot.range = range(annavg), 
+                  coords = latlon, plot.title = "Y (all)")
+p.mean = make_plot(use.residual = FALSE, transformed = "none", 
+                  y = y.mean - min(y.mean + y.err$y.sill + y.err$y.nug), 
+                  y.true = NULL, coords = latlon, plot.title = "Y (mean)",
+                  plot.range = range(y.mean - min(y.mean + y.err$y.sill + y.err$y.nug)))
+p.psill = make_plot(use.residual = FALSE, transformed = "none", 
+                  y = y.err$y.sill, y.true = NULL, plot.range = range(y.err$y.sill), 
+                  coords = latlon, plot.title = "Y (partial sill)")
+p.nug = make_plot(use.residual = FALSE, transformed = "none", 
+                  y = y.err$y.nug, y.true = NULL, plot.range = range(y.err$y.nug), 
+                  coords = latlon, plot.title = "Y (nugget)")
+
+ggarrange(p.all, p.mean, p.psill, p.nug,
+          nrow = 1, ncol = 2, common.legend = FALSE, legend = "right")
+```
+
+## Prediction
+
+10-fold cross-validation was conducted to assess the performance of different models on this data:
+
+```{r}
+Y.pls = Y.spatrf.cv = Y.spatrf.pl = Y.rf = Y.tprs = Y.rf.tprs = Y.tprs.rf = 
+  rep(NA, length(y.mean))
+
+for (j in 1:length(rslt)){
+  idx <- !is.na(rslt[[j]]$Y.pls)
+  Y.pls[idx] <- rslt[[j]]$Y.pls[idx]
+  Y.spatrf.cv[idx] <- rslt[[j]]$Y.spatrf.cv[idx]
+  Y.spatrf.pl[idx] <- rslt[[j]]$Y.spatrf.pl[idx]
+  Y.rf[idx] = rslt[[j]]$Y.rf[idx]
+  Y.tprs[idx] = rslt[[j]]$Y.tprs[idx]
+  Y.rf.tprs[idx] = rslt[[j]]$Y.rf.tprs[idx]
+  Y.tprs.rf[idx] = rslt[[j]]$Y.tprs.rf[idx]
+}
+Y.pls[Y.pls < 0] = 0
+# Y.pls[Y.pls > 15] = 15
+
+r2 = matrix(c(1 - mean((Y.pls - annavg)^2)/var(annavg),
+              1 - mean((Y.spatrf.pl - annavg)^2)/var(annavg),
+              1 - mean((Y.spatrf.cv - annavg)^2)/var(annavg),
+              1 - mean((Y.rf - annavg)^2)/var(annavg),
+              1 - mean((Y.tprs - annavg)^2)/var(annavg),
+              1 - mean((Y.rf.tprs - annavg)^2)/var(annavg),
+              1 - mean((Y.tprs.rf - annavg)^2)/var(annavg)), nrow = 1)
+
+knitr::kable(r2, col.names = c("UK-PLS", "SpatRF-PL", "SpatRF-CV", "RF", "TPRS", "RF-TPRS", "TPRS-RF"),
+             caption = "Cross-validated R-squared")
+```
+
+Visualization of the generated data and predictions:
+
+```{r, warning = FALSE, message = FALSE, fig.width=12, fig.height=18}
+
+res.range = range(c(Y.pls - annavg, Y.spatrf.pl - annavg, Y.spatrf.cv - annavg, 
+                    Y.rf - annavg, Y.tprs - annavg, Y.rf.tprs - annavg, Y.tprs.rf - annavg))
+# latlon = list(longitude = plltnt.mat$longitude, latitude = plltnt.mat$latitude)
+
+p = make_plot(use.residual = FALSE, transformed = "none", 
+          y = annavg, y.true = NULL, plot.range = c(0, (max(annavg) - min(annavg))), 
+          coords = latlon, plot.title = "Pollutant")
+p.pls = make_plot(use.residual = TRUE, transformed = "none", 
+          y = Y.pls, y.true = annavg, plot.range = res.range, 
+          coords = latlon, plot.title = "UK-PLS")
+p.spatrf.pl = make_plot(use.residual = TRUE, transformed = "none", 
+          y = Y.spatrf.pl, y.true = annavg, plot.range = res.range,
+          coords = latlon, plot.title = "SpatRF-PL")
+p.spatrf.cv = make_plot(use.residual = TRUE, transformed = "none", 
+          y = Y.spatrf.cv, y.true = annavg, plot.range = res.range,
+          coords = latlon, plot.title = "SpatRF-NP")
+p.rf = make_plot(use.residual = TRUE, transformed = "none", 
+          y = Y.rf, y.true = annavg, plot.range = res.range, 
+          coords = latlon, plot.title = "RF")
+p.tprs = make_plot(use.residual = TRUE, transformed = "none", 
+          y = Y.tprs, y.true = annavg, plot.range = res.range, 
+          coords = latlon, plot.title = "TPRS")
+p.rf.tprs = make_plot(use.residual = TRUE, transformed = "none", 
+          y = Y.rf.tprs, y.true = annavg, plot.range = res.range, 
+          coords = latlon, plot.title = "RF-TPRS")
+p.tprs.rf = make_plot(use.residual = TRUE, transformed = "none", 
+          y = Y.tprs.rf, y.true = annavg, plot.range = res.range, 
+          coords = latlon, plot.title = "TPRS-RF")
+
+ggarrange(p,p.pls,p.spatrf.pl,p.spatrf.cv, p.rf,p.tprs,p.rf.tprs,p.tprs.rf,
+            nrow = 4, ncol = 2, common.legend = FALSE, legend = "right")
+```
+
+## Variable Importance
+
+Recalling the mean model, we see that spatial RF captures this mechanism reasonably well.
+\[
+  Y_{\text{mean}} = -0.5\cdot\text{Dist to A1} + 0.2\cdot\text{Pop density}^2 - 1\cdot \text{median NDVI} + 0.5\cdot\sqrt{\text{Urban landuse}} + 0.5\cdot\text{Residential landuse} -0.25\cdot\text{Dist to A1}\times\text{Median NDVI}.
+\]
+
+```{r, warning = FALSE, message = FALSE, fig.width=16, fig.height = 6}
+library(tidyverse)
+library(ggallin)
+
+load("varimp_syn.RData")
+source("vip_function.R")
+
+cols = 1:ncol(X)
+qs = c(.25, .5, .75)
+
+avg.pls = avg.spatrf = matrix(NA, ncol = length(qs), nrow = ncol(X))
+avg.true = matrix(0, ncol = length(qs), nrow = ncol(X))
+
+# meanmod = function(x)
+#   x[1] * (-.4) + (x[2] - min(X1$pop_dens))^2 * .2 + x[3] * (-.8) + 
+#     sqrt(x[4] - min(X1$lu_mix_urban_p15000)) * .5 + x[5] * .5 + x[1]*x[3] * (-.25)
+meanmod = function(x)
+  x[1] * (-.5) + (x[2])^2 * .2 + x[3] * (-1) + 
+    sqrt(x[4] - min(X1$lu_mix_urban_p15000)) * .5 + x[5] * .5 + x[1]*x[3] * (-.25)
+
+means <- apply(X.active,2,mean)
+mean.matrix <- matrix(rep(means,nrow(X.active)),nrow=nrow(X.active),byrow=T)
+sds <- apply(X.active,2,sd)
+
+for (i in 1:ncol(X1)){
+  for (j in 1:length(qs)){
+    k = which(colnames(X) == colnames(X1)[i])
+    X.active.temp = X.active
+    X.active.temp[,i] = quantile(X.active[,i], qs[j])
+    X.active.temp = as.matrix(X.active.temp - mean.matrix) %*% diag(1/sds) %>% as.data.frame()
+    colnames(X.active.temp) = colnames(X.active)
+    X1.qt = X.active.temp %>% as.data.frame() %>%
+      # mutate_each(funs(scale2)) %>% 
+      mutate(pop_dens = ifelse(pop_dens > 2, 2, pop_dens)) %>%
+      mutate(lu_mix_urban_p15000 = ifelse(lu_mix_urban_p15000 > 3, 3, lu_mix_urban_p15000))
+    # X1.qt = X1
+    # X1.qt[,i] = quantile(X1[,i], qs[j])
+    avg.true[k,j] = mean((apply(FUN = meanmod, X = X1.qt, MARGIN = 1) +
+                            y.err$y.sill + y.err$y.nug - min(y.mean + y.err$y.sill + y.err$y.nug)))
+  }
+}
+
+k = 1
+for (i in cols){
+  for (j in 1:length(qs)){
+    avg.pls[i,j] = mean(rslt.syn$Y.pls[,k], na.rm = TRUE)
+    avg.spatrf[i,j] = mean(rslt.syn$Y.spatrf.cv[,k], na.rm = TRUE)
+    k = k + 1
+  }
+}
+
+plotImp2(cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1]),
+              (avg.true[,2]) - (avg.true[,1])),
+         cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2]),
+              (avg.true[,3]) - (avg.true[,2])),
+         cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1]),
+              (avg.true[,3]) - (avg.true[,1])),
+        "Predictors with Top Contribution, Synthetic Outcome", n_top = 5)
+
+```
+
+```{r, fig.width=16, fig.height = 16}
+plotImp2(cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1]),
+              (avg.true[,2]) - (avg.true[,1])),
+         cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2]),
+              (avg.true[,3]) - (avg.true[,2])),
+         cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1]),
+              (avg.true[,3]) - (avg.true[,1])),
+        "All Predictors, Synthetic Outcome", n_top = NULL, top_only = FALSE)
+```
+
+Scatter plots comparing variable importance values (square root tranformed):
+
+```{r, fig.width=10, fig.height = 10}
+ssqrt = function(x) sign(x) * sqrt(abs(x))
+
+par(mar = c(4,4,2,2), mfrow = c(3,3))
+plot(ssqrt(avg.true[,2] - avg.true[,1]), ssqrt(avg.pls[,2] - avg.pls[,1]), 
+              pch = 19, xlab = "Truth", ylab = "PLS", main = "25% to 50%")
+plot(ssqrt(avg.true[,3] - avg.true[,2]), ssqrt(avg.pls[,3] - avg.pls[,2]), 
+              pch = 19, xlab = "Truth", ylab = "PLS", main = "50% to 75%")
+plot(ssqrt(avg.true[,3] - avg.true[,1]), ssqrt(avg.pls[,3] - avg.pls[,1]), 
+              pch = 19, xlab = "Truth", ylab = "PLS", main = "25% to 70%")
+
+plot(ssqrt(avg.true[,2] - avg.true[,1]), ssqrt(avg.spatrf[,2] - avg.spatrf[,1]), 
+              pch = 19, xlab = "Truth", ylab = "SpatRF", main = "25% to 50%")
+plot(ssqrt(avg.true[,3] - avg.true[,2]), ssqrt(avg.spatrf[,3] - avg.spatrf[,2]), 
+              pch = 19, xlab = "Truth", ylab = "SpatRF", main = "50% to 75%")
+plot(ssqrt(avg.true[,3] - avg.true[,1]), ssqrt(avg.spatrf[,3] - avg.spatrf[,1]), 
+              pch = 19, xlab = "Truth", ylab = "SpatRF", main = "25% to 70%")
+
+plot(ssqrt(avg.pls[,2] - avg.pls[,1]), ssqrt(avg.spatrf[,2] - avg.spatrf[,1]), 
+              pch = 19, xlab = "PLS", ylab = "SpatRF", main = "25% to 50%")
+abline(a = 0, b = 1, col = 'red')
+plot(ssqrt(avg.pls[,3] - avg.pls[,2]), ssqrt(avg.spatrf[,3] - avg.spatrf[,2]), 
+              pch = 19, xlab = "PLS", ylab = "SpatRF", main = "50% to 75%")
+abline(a = 0, b = 1, col = 'red')
+plot(ssqrt(avg.pls[,3] - avg.pls[,1]), ssqrt(avg.spatrf[,3] - avg.spatrf[,1]), 
+              pch = 19, xlab = "PLS", ylab = "SpatRF", main = "25% to 70%")
+abline(a = 0, b = 1, col = 'red')
+```

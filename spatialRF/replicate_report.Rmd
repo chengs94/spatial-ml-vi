@@ -1,0 +1,157 @@
+---
+title: "Replicating spatial RF analysis"
+author: "Si Cheng"
+date: ' `r Sys.Date()` '
+output: 
+  html_document:
+    number_sections: no
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+load("spatRF_replicate3.RData")
+```
+
+## Summary
+This is a reproduction of (part of) the air pollution models originally done by Travis. Among the four PM2.5 sub-species in the original analysis, I choice elemental carbon (EC) to compare the performance of universal kriging (UK) versus the two spatial random forest models (pseudo-likelihood-based and nonparametric). 10-fold cross-validation (CV) was conducted, and prediction accuracy of each model was summarized below by $R^2$.
+
+```{r, echo = FALSE}
+# calculate R squared
+time.pls <- time.spatrf <- 0
+for (j in 1:length(rslt)){
+  idx <- !is.na(rslt[[j]]$Y.pls)
+  Y.pls[idx] <- rslt[[j]]$Y.pls[idx]
+  Y.spatrf.cv[idx] <- rslt[[j]]$Y.spatrf.cv[idx]
+  Y.spatrf.pl[idx] <- rslt[[j]]$Y.spatrf.pl[idx]
+  time.pls <- time.pls + rslt[[j]]$pls.time[3]
+  time.spatrf <- time.spatrf + rslt[[j]]$spatrf.time[3]
+}
+
+# print table
+rslt_table <- matrix(NA, nrow = 2, ncol = 3)
+rownames(rslt_table) <- c("Original", "Reproduced")
+colnames(rslt_table) <- c("UK PLS", "SpatRF (PL)","SpatRF (NP)")
+rslt_table[1,] <- c(0.73, 0.83, 0.83)
+rslt_table[2,] <- round(c(1 - mean((Y.pls^2 - annavg^2)^2)/var(annavg^2),
+                    1 - mean((Y.spatrf.pl^2 - annavg^2)^2)/var(annavg^2),
+                    1 - mean((Y.spatrf.cv^2 - annavg^2)^2)/var(annavg^2)), 2)
+library(knitr)
+kable(rslt_table)
+```
+In terms of computation time, UK+PLS took ```r round(time.pls/60, 2)``` minutes and the two SpatRF methods took ```r round(time.spatrf/60, 2)``` minutes in total (I used the default parameter value or narrower parameter range as used by Travis. Considering the time needed in parameter tuning, SpatRF will take longer than this in a new analysis).
+
+The figure below shows a comparison of predicted EC concentration from different models (bad coordinate scale conversion...).
+
+```{r, echo = FALSE, warning=FALSE, message = FALSE, fig.width=10, fig.height=8}
+library(usmap)
+library(ggplot2)
+library(gridExtra)
+top = 49.3457868 # north lat
+left = -124.7844079 # west long
+right = -66.9513812 # east long
+bottom =  24.7433195 # south lat
+longlat_scale <- c((right - left) / (max(grid$lambert_x) - min(grid$lambert_x)),
+                   (top - bottom) / (max(grid$lambert_y) - min(grid$lambert_y)))*c(0.88,0.85)
+new_coords <- cbind(grid$lambert_x*longlat_scale[1],
+                    grid$lambert_y*longlat_scale[2])
+longlat_loc <- c((left+right)/2-mean(new_coords[,1]),
+                 (top+bottom)/2-mean(new_coords[,2])) + c(-1.8,1.8)
+new_coords <- cbind(new_coords[,1] + longlat_loc[1],
+                    new_coords[,2] + longlat_loc[2])
+new_coords <- usmap_transform(as.data.frame(new_coords))
+EC_vals <- as.data.frame(cbind(annavg, Y.pls, Y.spatrf.pl, Y.spatrf.cv, 
+                               new_coords$V1.1, new_coords$V2.1))
+#transformed <- spTransform(SpatialPoints(EC.vals[,5:6], 
+#                                         proj4string=CRS("+proj=lcc +lat_1=30 +lat_2=60 +lat_0=40 +lon_0=-98 +datum=WGS84")), 
+#                           CRS("+proj=longlat +datum=WGS84"))
+
+#EC.vals[,5:6] <- usmap_transform(as.data.frame(coordinates(transformed)))[,3:4]
+colnames(EC_vals) <- c("Obs","UK_PLS", "SpatRF_PL", "SpatRF_NP", "x", "y")
+p.obs <- plot_usmap() + 
+         geom_point(data = usmap_transform(EC_vals), 
+                    aes(x = x, y = y, color = Obs), size = 2) +
+         scale_color_gradient(low = "white", high ="black", 
+                       limits = range(EC_vals[,1:4])) +
+         ggtitle("Observed EC concentration")
+p.pls <- plot_usmap() + 
+         geom_point(data = usmap_transform(EC_vals), 
+                    aes(x = x, y = y, color = Y.pls), size = 2) +
+         scale_color_gradient(low = "white", high ="black", 
+                       limits = range(EC_vals[,1:4])) +
+         ggtitle("Prediction via UK PLS")
+p.pl <- plot_usmap() + 
+        geom_point(data = usmap_transform(EC_vals), 
+                   aes(x = x, y = y, color = Y.spatrf.pl), size = 2) +
+        scale_color_gradient(low = "white", high ="black", 
+                       limits = range(EC_vals[,1:4])) +
+        ggtitle("Prediction via SpatRF-PL")
+p.cv <- plot_usmap() + 
+        geom_point(data = usmap_transform(EC_vals), 
+                   aes(x = x, y = y, color = Y.spatrf.cv), size = 2) +
+        scale_color_gradient(low = "white", high ="black", 
+                       limits = range(EC_vals[,1:4])) +
+        ggtitle("Prediction via SpatRF-NP")
+grid.arrange(arrangeGrob(p.obs,p.pls,p.pl,p.cv,nrow=2))
+```
+
+## Details and variable importance measures
+
+### Universal kriging + partial least squares
+Exponential covariance structure was used to fit the model. For each training/test set combination, 5-fold CV was conducted to find the best number of PLS components to include in the model. Among 4 of 5 training/test set combinations, using only the first PLS component lead to the best CV error. The figure below visualizes the loadings (averaged across the 5 CV folds) of the top 50 predictors. 
+
+```{r, echo = FALSE}
+var_imp_pls <- matrix(0, nrow = ncol(X), ncol = 10)
+var_imp_cv <- var_imp_pl <- rep(0, ncol(X))
+min_comp <- 10
+for (j in 1:numfold){
+  n_comp <- dim(rslt[[j]]$pc.obj$loadings)[2]
+  min_comp <- min(min_comp, n_comp)
+  var_imp_pls[colnames(X) %in% rslt[[j]]$spatrf.varnames, 1:n_comp] <- 
+    var_imp_pls[colnames(X) %in% rslt[[j]]$spatrf.varnames, 1:n_comp] + 
+    rslt[[j]]$pc.obj$loadings
+  var_imp_cv[colnames(X) %in% rslt[[j]]$spatrf.varnames] <- 
+    var_imp_cv[colnames(X) %in% rslt[[j]]$spatrf.varnames] + 
+    rslt[[j]]$spatrf.cv.obj$spatRF$var.imp
+  var_imp_pl[colnames(X) %in% rslt[[j]]$spatrf.varnames] <- 
+    var_imp_pl[colnames(X) %in% rslt[[j]]$spatrf.varnames] + 
+    rslt[[j]]$spatrf.cv.obj$spatRF.lklhd$var.imp
+}
+var_imp_pls <- as.data.frame(var_imp_pls[,1:min_comp]/numfold)
+var_imp_pls <- cbind(colnames(X), var_imp_pls)
+colnames(var_imp_pls) <- c("Variable", paste("Loading",1:min_comp, sep = ""))
+var_imp_pls <- var_imp_pls[order(-abs(var_imp_pls$Loading1)),]
+ggplot(data = var_imp_pls, aes(x = Loading1, y = Variable)) + 
+  geom_point(data = var_imp_pls[1:50,], alpha=0.5, ) + 
+  geom_vline(xintercept=0, linetype="solid", alpha=0.5) 
+```
+
+### Spatial random forest
+The spatial basis functions were constructed using thin plate regression splines (TPRS). Variable importance was assessed by permuting the values of each predictor and looking at the reduction in prediction accuracy, averaged over the 5 training/test set combinations. 
+In this example, SpatRF-PL and SpatRF-NP report identical importance measures for the predictors, because only two tuning parameters were considered, and both of them identified the same optimal tuning parameter.
+There are some similarities between the results of UK-PLS and SpatRF models in terms of predictors that are identified as ``important''.
+
+```{r, echo = FALSE}
+var_imp_spatrf <- as.data.frame(cbind(var_imp_pl/numfold, var_imp_cv/numfold))
+var_imp_spatrf <- cbind(colnames(X), var_imp_spatrf)
+colnames(var_imp_spatrf) <- c("Variable", "Importance_PL", "Importance_NP")
+var_imp_ord_pl <- var_imp_spatrf[order(-var_imp_spatrf$Importance_PL),]
+p_pl <- ggplot(data = var_imp_spatrf, aes(x = Importance_PL, y = Variable)) + 
+               geom_point(data = var_imp_spatrf[1:50,], alpha=0.5)
+var_imp_ord_cv <- var_imp_spatrf[order(-var_imp_spatrf$Importance_NP),]
+p_cv <- ggplot(data = var_imp_spatrf, aes(x = Importance_NP, y = Variable)) + 
+               geom_point(data = var_imp_spatrf[1:50,], alpha=0.5)
+grid.arrange(arrangeGrob(p_pl,p_cv,nrow=1))
+```
+
+## Questions
+* Parameter tuning for RF: many parameters; when do we use rule-of-thumbs and when do we choose via CV?
+  + number of trees, minimum leaf size, maximum number of leaves, number of covariates to sample at each stage, ...
+* SpatRF-NP seems to perform better in prediction than SpatRF-PL in all examples analyzed by Travis. This makes sense since prediction accuracy is the standard by which we train SpatRF-NP models. Does this mean SpatRF-NP would be a better choice for prediction problems than SpatRF-PL? What are some practical cases where SpatRF-PL would be more appropriate?
+* What is the intuition behind the fact that joint estimation (SpatRF) often outperforms two-stage procedures (RF+TPRS or TPRS+RF)?
+* Summarizing variable importance in UK+PLS when the optimal combination of components is changing for different training/test sets?
+* Anything else that should be considered in the analysis?
+* Ongoing / next step: learning to pre-process the TRAP data

@@ -1,0 +1,25 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1613541671191.000,
+    "dirty" : false,
+    "encoding" : "ISO8859-1",
+    "folds" : "",
+    "hash" : "1648896992",
+    "id" : "379A7BD3",
+    "lastKnownWriteTime" : 1613377086,
+    "last_content_update" : 1613377086,
+    "path" : "C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap/model2.R",
+    "project_path" : "model2.R",
+    "properties" : {
+        "cursorPosition" : "82,51",
+        "scrollLine" : "0"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 6,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

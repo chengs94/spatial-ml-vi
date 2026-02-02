@@ -1,0 +1,13 @@
+{
+    "path" : "C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap",
+    "sortOrder" : [
+        {
+            "ascending" : false,
+            "columnIndex" : 4
+        },
+        {
+            "ascending" : true,
+            "columnIndex" : 2
+        }
+    ]
+}

@@ -1,0 +1,930 @@
+---
+title: "Modeling PM2.5 sub-species concentration"
+author: "Si Cheng"
+date: ' `r Sys.Date()` '
+output: 
+  html_document:
+    number_sections: no
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message = FALSE)
+# load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/spatialRF/spatRF_replicate3.RData")
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/seeds3_ec_all_full.RData")
+rslt.ec = rslt
+annavg.ec = annavg
+plltnt.ec = plltnt.mat
+# load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/spatialRF/spatRF_replicate3_oc_full.RData")
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/seeds3_oc_all.RData")
+rslt.oc = rslt
+annavg.oc = annavg
+# load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/spatialRF/spatRF_replicate3_s_full.RData")
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/seeds3_s_all_full.RData")
+rslt.s = rslt
+annavg.s = annavg
+plltnt.s = plltnt.mat
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/seeds3_si_all.RData")
+rslt.si = rslt
+annavg.si = annavg
+rm(rslt, annavg)
+```
+
+## Overview
+This summary includes national air pollution models for PM2.5 sub-species, with a focus on variable importance measures. The tables below show cross-validated $R^2$ for UK-PLS and spatial RF (on the native and square root scale, respectively).
+
+```{r, echo = FALSE}
+# combine predictions
+time.pls <- time.spatrf <- 0
+Y.pls.oc = Y.spatrf.cv.oc = Y.spatrf.pl.oc = Y.rf.oc = Y.tprs.oc = Y.rf.tprs.oc = Y.tprs.rf.oc =
+  Y.pls = Y.spatrf.cv = Y.spatrf.pl = Y.rf = Y.tprs = Y.rf.tprs = Y.tprs.rf = 
+  rep(NA, length(rslt.ec[[1]]$Y.pls))
+Y.pls.s = Y.spatrf.cv.s = Y.spatrf.pl.s = Y.rf.s = Y.tprs.s = Y.rf.tprs.s = Y.tprs.rf.s =
+  Y.pls.si = Y.spatrf.cv.si = Y.spatrf.pl.si = Y.rf.si = Y.tprs.si = Y.rf.tprs.si = Y.tprs.rf.si =
+  rep(NA, length(rslt.s[[1]]$Y.pls))
+
+for (j in 1:length(rslt.ec)){
+  idx <- !is.na(rslt.ec[[j]]$Y.pls)
+  Y.pls[idx] <- rslt.ec[[j]]$Y.pls[idx]
+  Y.spatrf.cv[idx] <- rslt.ec[[j]]$Y.spatrf.cv[idx]
+  Y.spatrf.pl[idx] <- rslt.ec[[j]]$Y.spatrf.pl[idx]
+  Y.rf[idx] = rslt.ec[[j]]$Y.rf[idx]
+  Y.tprs[idx] = rslt.ec[[j]]$Y.tprs[idx]
+  Y.rf.tprs[idx] = rslt.ec[[j]]$Y.rf.tprs[idx]
+  Y.tprs.rf[idx] = rslt.ec[[j]]$Y.tprs.rf[idx]
+  time.pls <- time.pls + rslt.ec[[j]]$pls.time[3]
+  time.spatrf <- time.spatrf + rslt.ec[[j]]$spatrf.time[3]
+  
+  idx2 <- !is.na(rslt.oc[[j]]$Y.pls)
+  Y.pls.oc[idx2] <- rslt.oc[[j]]$Y.pls[idx2]
+  Y.spatrf.cv.oc[idx2] <- rslt.oc[[j]]$Y.spatrf.cv[idx2]
+  Y.spatrf.pl.oc[idx2] <- rslt.oc[[j]]$Y.spatrf.pl[idx2]
+  Y.rf.oc[idx2] = rslt.oc[[j]]$Y.rf[idx2]
+  Y.tprs.oc[idx2] = rslt.oc[[j]]$Y.tprs[idx2]
+  Y.rf.tprs.oc[idx2] = rslt.oc[[j]]$Y.rf.tprs[idx2]
+  Y.tprs.rf.oc[idx2] = rslt.oc[[j]]$Y.tprs.rf[idx2]
+  
+  idx3 <- !is.na(rslt.s[[j]]$Y.pls)
+  Y.pls.s[idx3] <- rslt.s[[j]]$Y.pls[idx3]
+  Y.spatrf.cv.s[idx3] <- rslt.s[[j]]$Y.spatrf.cv[idx3]
+  Y.spatrf.pl.s[idx3] <- rslt.s[[j]]$Y.spatrf.pl[idx3]
+  Y.rf.s[idx3] = rslt.s[[j]]$Y.rf[idx3]
+  Y.tprs.s[idx3] = rslt.s[[j]]$Y.tprs[idx3]
+  Y.rf.tprs.s[idx3] = rslt.s[[j]]$Y.rf.tprs[idx3]
+  Y.tprs.rf.s[idx3] = rslt.s[[j]]$Y.tprs.rf[idx3]
+  
+  idx4 <- !is.na(rslt.si[[j]]$Y.pls)
+  Y.pls.si[idx4] <- rslt.si[[j]]$Y.pls[idx4]
+  Y.spatrf.cv.si[idx4] <- rslt.si[[j]]$Y.spatrf.cv[idx4]
+  Y.spatrf.pl.si[idx4] <- rslt.si[[j]]$Y.spatrf.pl[idx4]
+  Y.rf.si[idx4] = rslt.si[[j]]$Y.rf[idx4]
+  Y.tprs.si[idx4] = rslt.si[[j]]$Y.tprs[idx4]
+  Y.rf.tprs.si[idx4] = rslt.si[[j]]$Y.rf.tprs[idx4]
+  Y.tprs.rf.si[idx4] = rslt.si[[j]]$Y.tprs.rf[idx4]
+}
+Y.pls[Y.pls < 0] = 0
+Y.pls.oc[Y.pls.oc < 0] = 0
+Y.spatrf.cv.oc[Y.spatrf.cv.oc < 0] = 0
+Y.spatrf.pl.oc[Y.spatrf.pl.oc < 0] = 0
+
+Y.pls.s[Y.pls.s < 0] = 0
+Y.spatrf.cv.s[Y.spatrf.cv.s < 0] = 0
+Y.spatrf.pl.s[Y.spatrf.pl.s < 0] = 0
+
+Y.pls.si[Y.pls.si < 0] = 0
+
+r2.table = matrix(c(1 - mean((Y.pls^2 - annavg.ec^2)^2)/var(annavg.ec^2),
+                    1 - mean((Y.spatrf.pl^2 - annavg.ec^2)^2)/var(annavg.ec^2),
+                    1 - mean((Y.spatrf.cv^2 - annavg.ec^2)^2)/var(annavg.ec^2),
+                    1 - mean((Y.rf^2 - annavg.ec^2)^2)/var(annavg.ec^2),
+                    1 - mean((Y.tprs^2 - annavg.ec^2)^2)/var(annavg.ec^2),
+                    1 - mean((Y.rf.tprs^2 - annavg.ec^2)^2)/var(annavg.ec^2),
+                    1 - mean((Y.tprs.rf^2 - annavg.ec^2)^2)/var(annavg.ec^2),
+                    .73, .83, .83, rep(NA, 4),
+                    1 - mean((Y.pls.oc^2 - annavg.oc^2)^2)/var(annavg.oc^2),
+                    1 - mean((Y.spatrf.pl.oc^2 - annavg.oc^2)^2)/var(annavg.oc^2),
+                    1 - mean((Y.spatrf.cv.oc^2 - annavg.oc^2)^2)/var(annavg.oc^2),
+                    1 - mean((Y.rf.oc^2 - annavg.oc^2)^2)/var(annavg.oc^2),
+                    1 - mean((Y.tprs.oc^2 - annavg.oc^2)^2)/var(annavg.oc^2),
+                    1 - mean((Y.rf.tprs.oc^2 - annavg.oc^2)^2)/var(annavg.oc^2),
+                    1 - mean((Y.tprs.rf.oc^2 - annavg.oc^2)^2)/var(annavg.oc^2),
+                    .58, .59, .63, rep(NA, 4),
+                    1 - mean((Y.pls.s^2 - annavg.s^2)^2)/var(annavg.s^2),
+                    1 - mean((Y.spatrf.pl.s^2 - annavg.s^2)^2)/var(annavg.s^2),
+                    1 - mean((Y.spatrf.cv.s^2 - annavg.s^2)^2)/var(annavg.s^2),
+                    1 - mean((Y.rf.s^2 - annavg.s^2)^2)/var(annavg.s^2),
+                    1 - mean((Y.tprs.s^2 - annavg.s^2)^2)/var(annavg.s^2),
+                    1 - mean((Y.rf.tprs.s^2 - annavg.s^2)^2)/var(annavg.s^2),
+                    1 - mean((Y.tprs.rf.s^2 - annavg.s^2)^2)/var(annavg.s^2),
+                    # 1 - mean((Y.pls.s[-257]^2 - annavg.s[-257]^2)^2)/var(annavg.s[-257]^2),
+                    # 1 - mean((Y.spatrf.pl.s[-257]^2 - annavg.s[-257]^2)^2)/var(annavg.s[-257]^2),
+                    # 1 - mean((Y.spatrf.cv.s[-257]^2 - annavg.s[-257]^2)^2)/var(annavg.s[-257]^2),
+                    .95, .94, .94, rep(NA, 4),
+                    1 - mean((Y.pls.si^2 - annavg.si^2)^2)/var(annavg.si^2),
+                    1 - mean((Y.spatrf.pl.si^2 - annavg.si^2)^2)/var(annavg.si^2),
+                    1 - mean((Y.spatrf.cv.si^2 - annavg.si^2)^2)/var(annavg.si^2),
+                    1 - mean((Y.rf.si^2 - annavg.si^2)^2)/var(annavg.si^2),
+                    1 - mean((Y.tprs.si^2 - annavg.si^2)^2)/var(annavg.si^2),
+                    1 - mean((Y.rf.tprs.si^2 - annavg.si^2)^2)/var(annavg.si^2),
+                    1 - mean((Y.tprs.rf.si^2 - annavg.si^2)^2)/var(annavg.si^2),
+                    .56, .58, .60, rep(NA, 4)),
+                  nrow = 8, byrow = TRUE)
+colnames(r2.table) = c("UK-PLS", "SpatRF-PL", "SpatRF-CV", "RF", "TPRS", "RF-TPRS", "TPRS-RF")
+rownames(r2.table) = c("EC", "(Original)", "OC", "(Original)", "S", # "S (one outlier removed)", 
+                       "(Original)", "Si", "(Original)")
+
+knitr::kable(r2.table, digits = 4, caption = "R2 on the native scale")
+
+r2.table2 = matrix(c(1 - mean((Y.pls - annavg.ec)^2)/var(annavg.ec),
+                    1 - mean((Y.spatrf.pl - annavg.ec)^2)/var(annavg.ec),
+                    1 - mean((Y.spatrf.cv - annavg.ec)^2)/var(annavg.ec),
+                    .82, NA, NA,
+                    1 - mean((Y.pls.oc - annavg.oc)^2)/var(annavg.oc),
+                    1 - mean((Y.spatrf.pl.oc - annavg.oc)^2)/var(annavg.oc),
+                    1 - mean((Y.spatrf.cv.oc - annavg.oc)^2)/var(annavg.oc),
+                    .69, NA, NA,
+                    1 - mean((Y.pls.s - annavg.s)^2)/var(annavg.s),
+                    1 - mean((Y.spatrf.pl.s - annavg.s)^2)/var(annavg.s),
+                    1 - mean((Y.spatrf.cv.s - annavg.s)^2)/var(annavg.s),
+                    .95, NA, NA,
+                    1 - mean((Y.pls.si - annavg.si)^2)/var(annavg.si),
+                    1 - mean((Y.spatrf.pl.si - annavg.si)^2)/var(annavg.si),
+                    1 - mean((Y.spatrf.cv.si - annavg.si)^2)/var(annavg.si),
+                    .62, NA, NA),
+                  nrow = 8, byrow = TRUE)
+colnames(r2.table2) = c("UK-PLS", "SpatRF-PL", "SpatRF-CV")
+rownames(r2.table2) = c("EC", "(Bergen)", "OC", "(Bergen)",
+                        "S", "(Bergen)", "Si", "(Bergen)")
+
+knitr::kable(r2.table2, digits = 4, caption = "R2 on the square root scale")
+```
+
+## Prediction and residual plots
+### EC
+
+The figure below shows a comparison of predicted EC concentration from different models.
+
+```{r, echo = FALSE, fig.width=24, fig.height=15}
+library(ggmap)
+library(ggplot2)
+library(gridExtra)
+library(ggpubr)
+library(dplyr)
+
+plot_pred = function(annavg, Y.pls, Y.spatrf.pl, Y.spatrf.cv, tt, plltnt.mat){
+  rslt <- as.data.frame(cbind(annavg^2, Y.pls^2, Y.spatrf.pl^2, Y.spatrf.cv^2, 
+                               plltnt.mat$longitude, plltnt.mat$latitude))
+  colnames(rslt) <- c("Obs","UK_PLS", "SpatRF_PL", "SpatRF_CV", 
+                       "longitude", "latitude")
+
+  bbox = c(left = min(rslt$longitude) - 2, bottom = min(rslt$latitude) - 2,
+         right = max(rslt$longitude) + 2, top = max(rslt$latitude) + 2)
+  usMap = suppressMessages(get_stamenmap(
+    bbox=bbox,
+    zoom = 6,
+    maptype = "toner-lite" #has airport symbol
+  #maptype = "toner-background" #roads & water but no airport
+  ))
+  # usMap <- get_map(location=c(min(rslt$longitude), min(rslt$latitude),
+  #                           max(rslt$longitude), max(rslt$latitude)),
+  #                source="stamen", maptype = "terrain", crop=FALSE)
+
+  p.obs <- ggmap(usMap, darken = c(.5, "white")) + 
+         geom_point(data = rslt, 
+                    aes(x = longitude, y = latitude, color = Obs, size = 1)) +
+         scale_color_viridis_c(option = "plasma", name = "", trans = "sqrt",
+                                  limits = range(rslt[,1:4])) +
+         scale_x_continuous(limits = c(min(rslt$longitude)-2,
+                                       max(rslt$longitude)+2), 
+                            expand = c(0, 0)) +
+         scale_y_continuous(limits = c(min(rslt$latitude)-2,
+                                       max(rslt$latitude)+2), 
+                            expand = c(0, 0)) +
+         guides(size = FALSE) + ggtitle("Observed") +
+    labs(x = "Longitude", y = "Latitude")
+         
+  p.pls <- ggmap(usMap, darken = c(.5, "white")) + 
+         geom_point(data = rslt, 
+                    aes(x = longitude, y = latitude, color = UK_PLS, size = 1)) +
+         scale_color_viridis_c(option = "plasma", name = "", trans = "sqrt",
+                                  limits = range(rslt[,1:4])) +
+        scale_x_continuous(limits = c(min(rslt$longitude)-2,
+                                       max(rslt$longitude)+2), 
+                            expand = c(0, 0)) +
+         scale_y_continuous(limits = c(min(rslt$latitude)-2,
+                                       max(rslt$latitude)+2), 
+                            expand = c(0, 0)) +
+         guides(size = FALSE) + ggtitle("UK PLS") +
+    labs(x = "Longitude", y = "Latitude")
+
+  p.pl <- ggmap(usMap, darken = c(.5, "white")) + 
+         geom_point(data = rslt, 
+                    aes(x = longitude, y = latitude, 
+                        color = SpatRF_PL, size = 1)) +
+         scale_color_viridis_c(option = "plasma", name = "", trans = "sqrt",
+                                  limits = range(rslt[,1:4])) +
+        scale_x_continuous(limits = c(min(rslt$longitude)-2,
+                                       max(rslt$longitude)+2), 
+                            expand = c(0, 0)) +
+         scale_y_continuous(limits = c(min(rslt$latitude)-2,
+                                       max(rslt$latitude)+2), 
+                            expand = c(0, 0)) +
+        guides(size = FALSE) + ggtitle("SpatRF-PL") +
+    labs(x = "Longitude", y = "Latitude")
+
+  p.cv <- ggmap(usMap, darken = c(.5, "white")) + 
+         geom_point(data = rslt, 
+                    aes(x = longitude, y = latitude, 
+                        color = SpatRF_CV, size = 1)) +
+         scale_color_viridis_c(option = "plasma", name = "", trans = "sqrt",
+                                  limits = range(rslt[,1:4])) +
+        scale_x_continuous(limits = c(min(rslt$longitude)-2,
+                                       max(rslt$longitude)+2), 
+                            expand = c(0, 0)) +
+         scale_y_continuous(limits = c(min(rslt$latitude)-2,
+                                       max(rslt$latitude)+2), 
+                            expand = c(0, 0)) +
+        guides(size = FALSE) + ggtitle("SpatRF-CV") +
+    labs(x = "Longitude", y = "Latitude")
+
+  ggarrange(p.obs,p.pls,p.pl,p.cv,
+            nrow = 2, ncol = 2, common.legend = TRUE, legend = "bottom") %>%
+    annotate_figure(top = text_grob(tt, face = "bold", size = 16))
+  # grid.arrange(arrangeGrob(p.obs,p.pls,p.pl,p.cv,nrow=2))
+}
+
+plot_pred(annavg.ec, Y.pls, Y.spatrf.pl, Y.spatrf.cv, "EC predictions", plltnt.ec)
+```
+
+Residual (predicted minus observed) map:
+
+```{r, echo = FALSE, fig.width=24, fig.height=12}
+# library(tidyverse)
+
+plot_res = function(annavg, Y.pls, Y.spatrf.pl, Y.spatrf.cv, 
+                    Y.rf, Y.tprs, Y.rf.tprs, Y.tprs.rf,
+                    tt, plltnt.mat){
+  rslt <- as.data.frame(cbind(annavg^2, Y.pls^2, Y.spatrf.pl^2, Y.spatrf.cv^2, 
+                              Y.rf^2, Y.tprs^2, Y.rf.tprs^2, Y.tprs.rf^2,
+                               plltnt.mat$longitude, plltnt.mat$latitude))
+  colnames(rslt) <- c("Obs","UK_PLS", "SpatRF_PL", "SpatRF_CV", 
+                      "RF", "TPRS", "RF_TPRS", "TPRS_RF",
+                       "longitude", "latitude")
+  
+  rslt$res_pls = rslt$UK_PLS - rslt$Obs
+  rslt$res_spatrf = rslt$SpatRF_PL - rslt$Obs
+  rslt$res_rf = rslt$RF - rslt$Obs
+  rslt$res_tprs = rslt$TPRS - rslt$Obs
+  rslt$res_rf_tprs = rslt$RF_TPRS - rslt$Obs
+  rslt$res_tprs_rf = rslt$TPRS_RF - rslt$Obs
+
+  bbox = c(left = min(rslt$longitude) - 2, bottom = min(rslt$latitude) - 2,
+         right = max(rslt$longitude) + 2, top = max(rslt$latitude) + 2)
+  usMap = suppressMessages(get_stamenmap(
+    bbox=bbox,
+    zoom = 6,
+    maptype = "toner-lite" #has airport symbol
+  #maptype = "toner-background" #roads & water but no airport
+  ))
+  
+  # usMap <- get_map(location=c(min(rslt$longitude), min(rslt$latitude),
+  #                           max(rslt$longitude), max(rslt$latitude)),
+  #                source="stamen", maptype = "terrain", crop=FALSE)
+
+  p1.pls <- ggmap(usMap, darken = c(.5, "white")) + 
+         geom_point(data = rslt, position = 'jitter',
+                    aes(x = longitude, y = latitude, 
+                        color = res_pls, size = abs(res_pls))) +
+         scale_color_gradient2(name = "", mid = "grey", limits = range(rslt[,11:16])) +
+         scale_x_continuous(limits = c(min(rslt$longitude)-2,
+                                       max(rslt$longitude)+2), 
+                            expand = c(0, 0)) +
+         scale_y_continuous(limits = c(min(rslt$latitude)-2,
+                                       max(rslt$latitude)+2), 
+                            expand = c(0, 0)) +
+         labs(x = "Longitude", y = "Latitude") +
+         guides(size = FALSE) + ggtitle("UK-PLS")
+
+  p1.pl <- ggmap(usMap, darken = c(.5, "white")) + 
+         geom_point(data = rslt, position = 'jitter', 
+                    aes(x = longitude, y = latitude, 
+                        color = res_spatrf, size = abs(res_spatrf))) +
+         scale_color_gradient2(name = "", mid = "grey", limits = range(rslt[,11:16])) +
+         scale_x_continuous(limits = c(min(rslt$longitude)-2,
+                                       max(rslt$longitude)+2), 
+                            expand = c(0, 0)) +
+         scale_y_continuous(limits = c(min(rslt$latitude)-2,
+                                       max(rslt$latitude)+2), 
+                            expand = c(0, 0)) +
+    labs(x = "Longitude", y = "Latitude") +
+        guides(size = FALSE) + ggtitle("SpatRF (PL)")
+  
+   p1.rf <- ggmap(usMap, darken = c(.5, "white")) + 
+         geom_point(data = rslt, position = 'jitter', 
+                    aes(x = longitude, y = latitude, 
+                        color = res_rf, size = abs(res_rf))) +
+         scale_color_gradient2(name = "", mid = "grey", limits = range(rslt[,11:16])) +
+         scale_x_continuous(limits = c(min(rslt$longitude)-2,
+                                       max(rslt$longitude)+2), 
+                            expand = c(0, 0)) +
+         scale_y_continuous(limits = c(min(rslt$latitude)-2,
+                                       max(rslt$latitude)+2), 
+                            expand = c(0, 0)) +
+     labs(x = "longitude", y = "latitude") +
+        guides(size = FALSE) + ggtitle("RF")
+   
+    p1.tprs <- ggmap(usMap, darken = c(.5, "white")) + 
+         geom_point(data = rslt, position = 'jitter', 
+                    aes(x = longitude, y = latitude, 
+                        color = res_tprs, size = abs(res_tprs))) +
+         scale_color_gradient2(name = "", mid = "grey", limits = range(rslt[,11:16])) +
+         scale_x_continuous(limits = c(min(rslt$longitude)-2,
+                                       max(rslt$longitude)+2), 
+                            expand = c(0, 0)) +
+         scale_y_continuous(limits = c(min(rslt$latitude)-2,
+                                       max(rslt$latitude)+2), 
+                            expand = c(0, 0)) +
+      labs(x = "Longitude", y = "Latitude") +
+        guides(size = FALSE) + ggtitle("TPRS")
+    
+    p1.rf.tprs <- ggmap(usMap) + 
+         geom_point(data = rslt, position = 'jitter', 
+                    aes(x = longitude, y = latitude, 
+                        color = res_rf_tprs, size = abs(res_rf_tprs))) +
+         scale_color_gradient2(name = "", mid = "grey", limits = range(rslt[,11:16])) +
+         scale_x_continuous(limits = c(min(rslt$longitude)-2,
+                                       max(rslt$longitude)+2), 
+                            expand = c(0, 0)) +
+         scale_y_continuous(limits = c(min(rslt$latitude)-2,
+                                       max(rslt$latitude)+2), 
+                            expand = c(0, 0)) +
+      labs(x = "Longitude", y = "Latitude") +
+        guides(size = FALSE) + ggtitle("RF-TPRS")
+    
+    p1.tprs.rf <- ggmap(usMap) + 
+         geom_point(data = rslt, position = 'jitter', 
+                    aes(x = longitude, y = latitude, 
+                        color = res_tprs_rf, size = abs(res_tprs_rf))) +
+         scale_color_gradient2(name = "", mid = "grey", limits = range(rslt[,11:16])) +
+         scale_x_continuous(limits = c(min(rslt$longitude)-2,
+                                       max(rslt$longitude)+2), 
+                            expand = c(0, 0)) +
+         scale_y_continuous(limits = c(min(rslt$latitude)-2,
+                                       max(rslt$latitude)+2), 
+                            expand = c(0, 0)) +
+      labs(x = "Longitude", y = "Latitude") +
+        guides(size = FALSE) + ggtitle("TPRS-RF")
+
+  ggarrange(p1.pls, p1.pl, p1.rf, p1.tprs, p1.tprs.rf, p1.rf.tprs, 
+            nrow = 2, ncol = 3, common.legend = TRUE, legend = "right") %>%
+    annotate_figure(top = text_grob(tt, face = "bold", size = 16))
+  # grid.arrange(arrangeGrob(p.obs,p.pls,p.pl,p.cv,nrow=2))
+}
+
+plot_res(annavg.ec, Y.pls, Y.spatrf.pl, Y.spatrf.cv, Y.rf, Y.tprs, Y.rf.tprs, Y.tprs.rf, 
+         "Cross-validated Prediction Errors, EC", plltnt.ec)
+# plot_res(annavg.ec, Y.pls, Y.spatrf.pl, Y.spatrf.cv, "EC residuals", plltnt.ec)
+```
+
+### OC
+```{r, echo = FALSE, fig.width=24, fig.height=15}
+plot_pred(annavg.oc, Y.pls.oc, Y.spatrf.pl.oc, Y.spatrf.cv.oc, "OC predictions", plltnt.ec)
+```
+
+```{r, echo = FALSE, fig.width=24, fig.height=12}
+plot_res(annavg.oc, Y.pls.oc, Y.spatrf.pl.oc, Y.spatrf.cv.oc, 
+         Y.rf.oc, Y.tprs.oc, Y.rf.tprs.oc, Y.tprs.rf.oc, 
+         "Cross-validated Prediction Errors, OC", plltnt.ec)
+```
+
+### S
+```{r, echo = FALSE, fig.width=24, fig.height=15}
+plot_pred(annavg.s, Y.pls.s, Y.spatrf.pl.s, Y.spatrf.cv.s, "Cross-validated Prediction Errors, S",
+          plltnt.s)
+```
+
+```{r, echo = FALSE, fig.width=24, fig.height=12}
+# plot_res(annavg.s, Y.pls.s, Y.spatrf.pl.s, Y.spatrf.cv.s, "S residuals", plltnt.s)
+plot_res(annavg.s, Y.pls.s, Y.spatrf.pl.s, Y.spatrf.cv.s, Y.rf.s, Y.tprs.s, Y.rf.tprs.s, Y.tprs.rf.s, 
+         "Cross-validated Prediction Errors, S", plltnt.s)
+```
+
+### Si
+```{r, echo = FALSE, fig.width=24, fig.height=15}
+plot_pred(annavg.si, Y.pls.si, Y.spatrf.pl.si, Y.spatrf.cv.si, "Si predictions", plltnt.s)
+```
+
+```{r, echo = FALSE, fig.width=24, fig.height=12}
+plot_res(annavg.si, Y.pls.si, Y.spatrf.pl.si, Y.spatrf.cv.si, 
+         Y.rf.si, Y.tprs.si, Y.rf.tprs.si, Y.tprs.rf.si, 
+         "Cross-validated Prediction Errors, Si", plltnt.s)
+```
+
+## Variable importance plots
+
+### EC
+
+```{r, fig.width=10, fig.height = 12}
+library(tidyverse)
+# load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/national/national_ec_spatRF.RData")
+# rslt.spatrf = rslt
+# 
+# load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/national/national_ec_pls_rf.RData")
+# rslt.pls = rslt
+
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/national/varimp_seed3_ec_full.RData")
+
+cols = 1:ncol(X)
+qs = c(.25, .5, .75)
+
+avg.pls = avg.spatrf = matrix(NA, ncol = length(qs), nrow = ncol(X))
+k = 1
+
+for (i in cols){
+  for (j in 1:length(qs)){
+    avg.pls[i,j] = mean(rslt.ec$Y.pls[,k]^2, na.rm = TRUE)
+    avg.spatrf[i,j] = mean(rslt.ec$Y.spatrf.cv[,k]^2, na.rm = TRUE)
+    # avg.rf[i,j] = mean(rslt.pls[[k]]$Y.rf^2, na.rm = TRUE)
+    # avg.rf.tprs[i,j] = mean(rslt.pls[[k]]$Y.rf.tprs^2, na.rm = TRUE)
+    k = k + 1
+  }
+}
+
+plotImp = function(impMat, tt, rslt = rslt.ec){
+  my.alpha = .3
+  # colnames(impMat) = c("Method PLS", "Method SpatRF-PL", "Method RF", "Method RF-TPRS")
+  colnames(impMat) = c("Method PLS", "Method SpatRF")
+  # impMat = impMat[,c(1,2)]
+  
+  split_cov_name <- function(dt, cov) {
+    dt <- suppressWarnings(dt %>%
+                             rename(cov_full_name = cov) %>%
+                             mutate(
+                               buffer = substr(cov_full_name, nchar(cov_full_name)-4, nchar(cov_full_name)),
+                               buffer = as.numeric(ifelse(!is.na(as.integer(buffer)), buffer, NA)),
+                               cov = ifelse(is.na(buffer), cov_full_name, substr(cov_full_name, 1, nchar(cov_full_name)-5) )
+                             )
+    ) %>%
+      select(contains("cov"), buffer, everything())
+    return(dt)
+  }
+  
+  impMat = as.matrix(impMat)
+  rownames(impMat) = (rslt$spatrf.varnames)
+  dtNew <- impMat %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "cov") %>%
+    # rename variables if buffers
+    split_cov_name(cov = "cov") %>%
+      #make long format for faceting
+      gather(key = "Method", value = "Importance", contains("Method")) %>%
+      mutate(Method = substr(Method, 8, nchar(Method))) 
+  #colnames(dtNew)[4] = "Importance"
+  
+  dtNew  %>%
+    #buffered covariates
+    drop_na(buffer) %>%
+    ggplot(aes(x = Importance, y = cov)) +
+    geom_point(aes(size=buffer),
+               shape=1,
+               alpha=my.alpha) +
+    scale_size(breaks = c(min(dtNew$buffer, na.rm = T),
+                          max(dtNew$buffer, na.rm = T)
+    )) + #500, 5000, 10000,
+    #non-buffered covariates
+    geom_point(data = dtNew[is.na(dtNew$buffer),],
+               alpha=my.alpha,
+               aes(shape="")) +
+    geom_vline(xintercept=0,
+               linetype="solid",
+               alpha=my.alpha) +
+    facet_wrap(~ Method, scales = "free_x",
+                 labeller = "label_both",
+                 nrow = 1) +
+    labs(y = "Geocovariate", x = "Predictor Contribution",
+         shape= "non-buffer", #"proximity,\nelevation",
+         #title = paste("PLS Importance:", pollutant)) +
+         title = tt) +
+    theme(legend.position = "bottom", text = element_text(size = 16))
+}
+
+plotImp(cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])),
+        "Mean difference in prediction, 25% to 50% quantile, EC")
+
+plotImp(cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])),
+        "Mean difference in prediction, 50% to 75% quantile, EC")
+
+plotImp(cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])),
+        "Mean difference in prediction, 25% to 75% quantile, EC")
+
+```
+Largest differences between UK-PLS and Spatial RF:
+
+```{r}
+vim_25_50 = cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.ec$spatrf.varnames)
+vim_50_75 = cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.ec$spatrf.varnames)
+vim_25_75 = cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.ec$spatrf.varnames)
+
+vim_25_50 %>% top_n(diff, n = 10) %>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "25% to 50% quantile, EC")
+vim_50_75 %>% top_n(diff, n = 10)%>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "50% to 75% quantile, EC")
+vim_25_75 %>% top_n(diff, n = 10) %>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "25% to 75% quantile, EC")
+```
+
+```{r}
+
+```
+
+**Cleaned plots, top 10 differences**
+
+```{r, echo = FALSE, fig.width=16, fig.height = 6}
+
+plotImp2 = function(impMat1, impMat2, impMat3, tt, n_top = 5){
+  # my.alpha = .3
+  my.alpha = .8
+  
+  colnames(impMat1) = colnames(impMat2) = colnames(impMat3) =
+    c("Method UK-PLS", "Method SpatRF")
+  
+  split_cov_name <- function(dt, cov) {
+    dt <- suppressWarnings(dt %>%
+                             rename(cov_full_name = cov) %>%
+                             mutate(
+                               buffer = substr(cov_full_name, nchar(cov_full_name)-4, nchar(cov_full_name)),
+                               buffer = as.numeric(ifelse(!is.na(as.integer(buffer)), buffer, NA)),
+                               cov = ifelse(is.na(buffer), cov_full_name, substr(cov_full_name, 1, nchar(cov_full_name)-5) )
+                             )
+    ) %>%
+      select(contains("cov"), buffer, everything())
+    
+    # elevation
+    dt$cov[grepl("^elev_.+_above$", dt$cov_full_name)] <- "elev_above"
+    dt$cov[grepl("^elev_.+_below$", dt$cov_full_name)] <- "elev_below"
+    dt$cov[grepl("^elev_.+_stdev$", dt$cov_full_name)] <- "elev_stdev"
+    dt$cov[grepl("^elev_.+_at_elev$", dt$cov_full_name)] <- "elev_at_elev"
+    
+    dt$buffer[grepl("_1k_", dt$cov_full_name)] <- 1000
+    dt$buffer[grepl("_5k_", dt$cov_full_name)] <- 5000
+    
+    return(dt)
+  }
+  
+  impMat = rbind(impMat1, impMat2, impMat3) %>% as.data.frame()
+  # impMat.std = rbind(impMat1.std, impMat2.std, impMat3.std) %>% as.data.frame()
+  impMat$Quantiles = rep(c("25% to 50%", "50% to 75%", "25% to 75%"), 
+                         each = nrow(impMat1))
+  impMat$Diff = abs(impMat[,1] - impMat[,2])
+  # impMat$Diff = abs(impMat.std[,1] - impMat.std[,2])
+  impMat$cov = rep(colnames(X), 3)
+  
+  # impMat_top = impMat %>% group_by(Quantiles) %>% 
+  #   slice_max(order_by = Diff, n = 5)
+  
+  #rownames(impMat) = rep(colnames(X), 3)
+  dtNew <- impMat %>%
+    as.data.frame() %>%
+    #rownames_to_column(var = "cov") %>%
+    # rename variables if buffers
+    split_cov_name(cov = "cov") %>%
+    #make long format for faceting
+    gather(key = "Method", value = "Importance", contains("Method")) %>%
+    mutate(Method = substr(Method, 8, nchar(Method))) 
+  
+  # set1 = dtNew %>% filter(Quantiles == "25% to 50%" & Method == "PLS") %>%
+  #   slice_max(order_by = Diff, n = n_top) %>% select(cov) %>% c() %>% unlist()
+  # set2 = dtNew %>% filter(Quantiles == "50% to 75%" & Method == "PLS") %>%
+  #   slice_max(order_by = Diff, n = n_top) %>% select(cov) %>% c() %>% unlist()
+  # set3 = dtNew %>% filter(Quantiles == "25% to 75%" & Method == "PLS") %>%
+  #   slice_max(order_by = Diff, n = n_top) %>% select(cov) %>% c() %>% unlist()
+  set1 = dtNew %>% filter(Quantiles == "25% to 50%" & Method == "UK-PLS") %>%
+    slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+  set2 = dtNew %>% filter(Quantiles == "50% to 75%" & Method == "UK-PLS") %>%
+    slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+  set3 = dtNew %>% filter(Quantiles == "25% to 75%" & Method == "UK-PLS") %>%
+    slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+  set1.2 = dtNew %>% filter(Quantiles == "25% to 50%" & Method == "SpatRF") %>%
+    slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+  set2.2 = dtNew %>% filter(Quantiles == "50% to 75%" & Method == "SpatRF") %>%
+    slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+  set3.2 = dtNew %>% filter(Quantiles == "25% to 75%" & Method == "SpatRF") %>%
+    slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+  # subset = set1 %>% union(set2) %>% union(set3)
+  subset = set1 %>% union(set2) %>% union(set3) %>% 
+    union(set1.2) %>% union(set2.2) %>% union(set3.2)
+  dtNew = dtNew[dtNew$cov %in% subset, ] %>% arrange(cov)
+  
+  dtNew %>%
+    #buffered covariates
+    drop_na(buffer) %>%
+    ggplot(aes(x = Importance, y = cov)) +
+    geom_point(aes(size=buffer, color = Method), shape=1, alpha=my.alpha) +
+    scale_size(breaks = c(min(dtNew$buffer, na.rm = T),
+                          max(dtNew$buffer, na.rm = T))) + #500, 5000, 10000,
+    #non-buffered covariates
+    geom_point(data = dtNew[is.na(dtNew$buffer),],
+               alpha=my.alpha, aes(shape="", color = Method)) +
+    geom_vline(xintercept=0,
+               linetype="solid",
+               alpha=.3) +
+    scale_y_discrete(labels=c("pop_s" = "Population", "ndvi_summer_a" = "NDVI (summer)",
+                              "ndvi_q75_a" = "NDVI (annual 75%ile)",
+                              "ndvi_q50_a" = "NDVI (annual median)",
+                              "ndvi_winter_a" = "NDVI (winter)",
+                              "m_to_ry" = "Dist to railyard",
+                              "m_to_rr" = "Dist to railroad",
+                              "m_to_l_airp" = "Dist to large airport",
+                              "m_to_airp" = "Dist to airport",
+                              "m_to_a1" = "Dist to A1 road",
+                              "lu_transport_p" = "Transportation",
+                              "lu_resi_p" = "Residential",
+                              "lu_industrial_p" = "Industrial",
+                              "lu_comm_p" = "Commercial",
+                              "lu_crop_p" = "Agricultural",
+                              "lu_green_p" = "Forest land",
+                              "lu_oth_urban_p" = "Urban (other) land use",
+                              "ll_a3_s" = "A3 road length",
+                              "tl_s" = "Truck route length",
+                              "rlu_evergreen_p" = "Evergreen forest",
+                              "rlu_water_p" = "Water",
+                              "pop10_s" = "Population",
+                              "ll_a1_s" = "A1 road length",
+                              "ll_a23_s" = "A2,A3 road length",
+                              "rlu_dev_hi_p" = "Dev high intensity",
+                              "rlu_dev_med_p" = "Dev medium intensity",
+                              "log_m_to_ry" = "Log(dist) to railyard",
+                              "log_m_to_l_airp" = "Log(dist) to large airport",
+                              "log_m_to_airp" = "Log(dist) to airport",
+                              "log_m_to_m_port" = "Log(dist) to medium port",
+                              "log_m_to_a1" = "Log(dist) to A1 road",
+                              "log_m_to_a1_a1_intersect" = "Log(dist) to A1/A1 intersec",
+                              "log_m_to_a2_a3_intersect" = "Log(dist) to A2/A3 intersec",
+                              "log_m_to_a1_a3_intersect" = "Log(dist) to A1/A3 intersec",
+                              "log_m_to_truck" = "Log(dist) to truck route",
+                              "log_m_to_rr" = "Log(dist) to railroad",
+                              "imp_a" = "Impervious surface",
+                              "elev_elevation" = "Elevation",
+                              "elev_below" = "High relative elevation",
+                              "elev_at_elev" = "Intermediate relative elevation",
+                              "elev_above" = "Low relative elevation")) +
+    facet_wrap(~ Quantiles, scales = "fixed", # scales = "free_x",
+               labeller = "label_both",
+               nrow = 1) +
+    labs(y = "Geocovariate", x = "Predictor Contribution",
+         shape= "non-buffer", #"proximity,\nelevation",
+         #title = paste("PLS Importance:", pollutant)) +
+         title = tt) +
+    theme(legend.position = "bottom", text = element_text(size = 16))
+}
+
+plotImp2(cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])),
+         cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])),
+         cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])),
+        "Predictors with Top Contribution, EC", n_top = 5)
+```
+
+### OC
+```{r, fig.width=10, fig.height = 12}
+
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/national/varimp_seed3_oc.RData")
+
+cols = 1:ncol(X)
+qs = c(.25, .5, .75)
+
+avg.pls = avg.spatrf = matrix(NA, ncol = length(qs), nrow = ncol(X))
+k = 1
+
+for (i in cols){
+  for (j in 1:length(qs)){
+    avg.pls[i,j] = mean(rslt.oc$Y.pls[,k]^2, na.rm = TRUE)
+    avg.spatrf[i,j] = mean(rslt.oc$Y.spatrf.cv[,k]^2, na.rm = TRUE)
+    # avg.rf[i,j] = mean(rslt.pls[[k]]$Y.rf^2, na.rm = TRUE)
+    # avg.rf.tprs[i,j] = mean(rslt.pls[[k]]$Y.rf.tprs^2, na.rm = TRUE)
+    k = k + 1
+  }
+}
+
+plotImp(cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])),
+        "Mean difference in prediction, 25% to 50% quantile, OC")
+
+plotImp(cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])),
+        "Mean difference in prediction, 50% to 75% quantile, OC")
+
+plotImp(cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])),
+        "Mean difference in prediction, 25% to 75% quantile, OC")
+```
+
+Largest differences between UK-PLS and Spatial RF:
+
+```{r}
+vim_25_50 = cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.oc$spatrf.varnames)
+vim_50_75 = cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.oc$spatrf.varnames)
+vim_25_75 = cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.oc$spatrf.varnames)
+
+vim_25_50 %>% top_n(diff, n = 5) %>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "25% to 50% quantile, OC")
+vim_50_75 %>% top_n(diff, n = 5)%>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "50% to 75% quantile, OC")
+vim_25_75 %>% top_n(diff, n = 5) %>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "25% to 75% quantile, OC")
+```
+
+**Cleaned plots, top 10 differences**
+
+```{r, echo = FALSE, fig.width=16, fig.height = 6}
+
+plotImp2(cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])),
+         cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])),
+         cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])),
+        "Predictors with Top Contribution, OC", n_top = 5)
+```
+
+### S
+
+```{r, fig.width=10, fig.height = 12}
+load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/national/varimp_seed3_s.RData")
+# rslt.s = rslt.oc # wrong name in my original code!
+rm(rslt.oc)
+
+cols = 1:ncol(X)
+qs = c(.25, .5, .75)
+
+avg.pls = avg.spatrf = matrix(NA, ncol = length(qs), nrow = ncol(X))
+k = 1
+
+for (i in cols){
+  for (j in 1:length(qs)){
+    avg.pls[i,j] = mean(rslt.s$Y.pls[,k]^2, na.rm = TRUE)
+    avg.spatrf[i,j] = mean(rslt.s$Y.spatrf.cv[,k]^2, na.rm = TRUE)
+    # avg.rf[i,j] = mean(rslt.pls[[k]]$Y.rf^2, na.rm = TRUE)
+    # avg.rf.tprs[i,j] = mean(rslt.pls[[k]]$Y.rf.tprs^2, na.rm = TRUE)
+    k = k + 1
+  }
+}
+
+plotImp(cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])),
+        "Mean difference in prediction, 25% to 50% quantile, S", rslt = rslt.s)
+
+plotImp(cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])),
+        "Mean difference in prediction, 50% to 75% quantile, S", rslt = rslt.s)
+
+plotImp(cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])),
+        "Mean difference in prediction, 25% to 75% quantile, S", rslt = rslt.s)
+```
+
+Largest differences between UK-PLS and Spatial RF:
+
+```{r}
+vim_25_50 = cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.s$spatrf.varnames)
+vim_50_75 = cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.s$spatrf.varnames)
+vim_25_75 = cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.s$spatrf.varnames)
+
+vim_25_50 %>% top_n(diff, n = 5) %>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "25% to 50% quantile, S")
+vim_50_75 %>% top_n(diff, n = 5)%>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "50% to 75% quantile, S")
+vim_25_75 %>% top_n(diff, n = 5) %>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "25% to 75% quantile, S")
+```
+
+**Cleaned plots, top 10 differences**
+
+```{r, echo = FALSE, fig.width=16, fig.height = 6}
+
+plotImp2(cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])),
+         cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])),
+         cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])),
+        "Predictors with Top Contribution, S", n_top = 5)
+```
+
+### Si
+
+```{r, fig.width=10, fig.height = 12}
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/national/varimp_si.RData")
+
+cols = 1:ncol(X)
+qs = c(.25, .5, .75)
+
+avg.pls = avg.spatrf = matrix(NA, ncol = length(qs), nrow = ncol(X))
+k = 1
+
+for (i in cols){
+  for (j in 1:length(qs)){
+    avg.pls[i,j] = mean(rslt.si$Y.pls[,k]^2, na.rm = TRUE)
+    avg.spatrf[i,j] = mean(rslt.si$Y.spatrf.cv[,k]^2, na.rm = TRUE)
+    # avg.rf[i,j] = mean(rslt.pls[[k]]$Y.rf^2, na.rm = TRUE)
+    # avg.rf.tprs[i,j] = mean(rslt.pls[[k]]$Y.rf.tprs^2, na.rm = TRUE)
+    k = k + 1
+  }
+}
+
+plotImp(cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])),
+        "Mean difference in prediction, 25% to 50% quantile, Si", rslt = rslt.si)
+
+plotImp(cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])),
+        "Mean difference in prediction, 50% to 75% quantile, Si", rslt = rslt.si)
+
+plotImp(cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])),
+        "Mean difference in prediction, 25% to 75% quantile, Si", rslt = rslt.si)
+```
+
+Largest differences between UK-PLS and Spatial RF:
+
+```{r}
+vim_25_50 = cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.s$spatrf.varnames)
+vim_50_75 = cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.s$spatrf.varnames)
+vim_25_75 = cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), 
+                             varname = rslt.s$spatrf.varnames)
+
+vim_25_50 %>% top_n(diff, n = 5) %>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "25% to 50% quantile, Si")
+vim_50_75 %>% top_n(diff, n = 5)%>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "50% to 75% quantile, Si")
+vim_25_75 %>% top_n(diff, n = 5) %>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "25% to 75% quantile, Si")
+```
+
+**Cleaned plots, top 10 differences**
+
+```{r, echo = FALSE, fig.width=16, fig.height = 6}
+
+plotImp2(cbind((avg.pls[,2]) - (avg.pls[,1]), 
+              (avg.spatrf[,2]) - (avg.spatrf[,1])),
+         cbind((avg.pls[,3]) - (avg.pls[,2]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,2])),
+         cbind((avg.pls[,3]) - (avg.pls[,1]), 
+              (avg.spatrf[,3]) - (avg.spatrf[,1])),
+        "Predictors with Top Contribution, Si", n_top = 10)
+```

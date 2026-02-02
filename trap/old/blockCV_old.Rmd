@@ -1,0 +1,112 @@
+---
+title: "TRAP models with block CV"
+author: "Si Cheng"
+date: ' `r Sys.Date()` '
+output: 
+  html_document:
+    number_sections: no
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+## Block and stratified cross-validation
+```{r, include = FALSE}
+library(sf)
+library(blockCV)
+library(ggmap)
+#library(grid)
+library(ggplot2)
+library(gridExtra)
+
+load("trap_cv_block.RData")
+bc.block = rslt.bc.uw
+ufp.block = rslt.ufp.uw
+load("trap_cv_strat.RData")
+bc.strat = rslt.bc.uw
+ufp.strat = rslt.ufp.uw
+rm("rslt.bc.primary", "rslt.ufp.primary", "rslt.bc.uw", "rslt.ufp.uw")
+
+#lake.shp = st_read("Waterbodies_lake_WA/Waterbodies_with_History_and_Jurisdictional_detail___wtrbdy_det_area.shp")
+
+set.seed(2333)
+temp = st_as_sf(dat, coords = c("lambert_x", "lambert_y"))
+#st_crs(temp) = 4326
+sb <- spatialBlock(speciesData = temp, # sf or SpatialPoints
+                   #species = "Species", 
+                   # the response column (binomial or multi-class)
+                   #rasterLayer = myrasters, # a raster for backgoround (optional)
+                   theRange = 10000, # size of the blocks
+                   k = numfold, # the number of folds
+                   selection = "random",
+                   iteration = 100, # find evenly dispersed folds
+                   biomod2Format = TRUE)
+rm(temp)
+```
+
+```{r, fig.width=16, fig.height=12}
+dat$block_fold = dat$strat_fold = rep(NA, n)
+for (j in 1:numfold){
+  dat$block_fold[folds[[j]][[2]]] = j
+  for (k in 1:numfold){
+    dat$strat_fold[folds[[k]][[2]][ind.strt[[k]][j]:ind.stop[[k]][j]]] = j
+  }
+}
+
+dat$block_fold = as.factor(dat$block_fold)
+dat$strat_fold = as.factor(dat$strat_fold)
+#dat$id = 1:nrow(dat)
+dat$id = floor(1:nrow(dat)/(nrow(dat)/10))
+dat$id[dat$id > 10 - 1] = 10 - 1
+dat$id = as.factor(dat$id)
+
+dat$id2 = NA
+dat$id2[dat$id == "7" & dat$latitude.x > 47.7] = 1
+dat$id2[dat$id == "9" & dat$longitude.x > -122.3 & dat$latitude.x > 47.64] = 1
+dat$id2[dat$id %in% c("3","4","5") & dat$latitude.x > 47.63] = 2
+dat$id2[dat$id == "6" & dat$latitude.x > 47.63] = 2
+dat$id2[dat$id == "9" & dat$longitude.x <= -122.3] = 2
+dat$id2[dat$id == "2" & dat$longitude.x <= -122.25] = 3
+dat$id2[dat$id == "0" & dat$latitude.x > 47.45] = 3
+dat$id2[dat$id == "1" & dat$longitude.x < -122.25] = 3
+dat$id2[is.na(dat$id2) & dat$id %in% c("4","5","6","7")] = 4
+dat$id2[is.na(dat$id2)] = 5
+dat$id2 = as.factor(dat$id2)
+
+seaMap <- get_map(location=c(min(dat$longitude.x), min(dat$latitude.x),
+                             max(dat$longitude.x), max(dat$latitude.x)),
+                 source="stamen", maptype = "terrain", crop=FALSE)
+ #p_block = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  #          geom_point(data = dat, aes(x = longitude.x, y = latitude.x, 
+  #                           color = block_fold), size = 3) + #size = Y.pls
+  #          scale_color_viridis_d(name = "") +
+  #          ggtitle("CV folds: block") + guides(size = FALSE) +
+  #          theme(plot.margin=unit(rep(0,4), "pt"), 
+  #                text = element_text(size = 16))
+p_block = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = dat, aes(x = longitude.x, y = latitude.x, 
+                             color = id2), size = 3) + #size = Y.pls
+            scale_color_viridis_d(name = "") +
+            ggtitle("CV folds: block") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+ p_strat = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = dat, aes(x = longitude.x, y = latitude.x, 
+                             color = strat_fold), size = 3) + #size = Y.pls
+            scale_color_viridis_d(name = "") +
+            ggtitle("CV folds: stratified") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+ #p_id = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+#            geom_point(data = dat, aes(x = longitude.x, y = latitude.x, 
+#                             color = id), size = 3) + #size = Y.pls
+#            scale_color_viridis_d(name = "") +
+#            ggtitle("Row id") + guides(size = FALSE) +
+#            theme(plot.margin=unit(rep(0,4), "pt"), 
+#                  text = element_text(size = 16))
+grid.arrange(arrangeGrob(p_block, p_strat, nrow=1))
+```

@@ -1,0 +1,208 @@
+# replicating spatial RF analysis
+# along with universal kriging
+
+library(randomForest)
+library(SpatioTemporal)
+library(matrixStats)
+library(pls)
+library(inline)
+library(parallel)
+
+setwd("/home/users/chengsi/Desktop/exposurepred/spatRF/")
+
+source("aux_functions.R")
+source("spatTree.R")
+
+load("syn_new_corr.RData")
+
+job_no = 4
+# set.seed(3)
+# set.seed(job_no*5, kind="L'Ecuyer-CMRG")
+set.seed(233)
+
+pollutant <- c("EC","OC","S","Si")[job_no]
+plltnt.mat <- read.csv(paste0("data/", pollutant,".txt"))
+plltnt.mat <- plltnt.mat[-which(plltnt.mat$native_id=="PHOE5"),]
+
+if(pollutant %in% c("S","Si")){
+  annavg <- plltnt.mat[,2]
+  X <- plltnt.mat[,c(14:25,27:613)]
+} else{
+  sum1 <- ifelse(is.na(plltnt.mat[,2]),0,plltnt.mat[,2]*plltnt.mat[,3])
+  obs1 <-  ifelse(is.na(plltnt.mat[,3]),0,plltnt.mat[,3])
+  sum2 <- ifelse(is.na(plltnt.mat[,5]),0,plltnt.mat[,5]*plltnt.mat[,6])
+  obs2 <- ifelse(is.na(plltnt.mat[,6]),0,plltnt.mat[,6])
+  annavg <- (sum1+sum2)/(obs1+obs2)
+  X <- plltnt.mat[,c(18:29,31:617)]
+}
+
+# annavg <- sqrt(annavg)
+y.errs = y.err$y.nug + y.err$y.sill
+annavg = y.errs + c(y.mean) - min(y.errs + c(y.mean)) 
+b0 = min(y.errs + c(y.mean))
+
+n <- length(annavg)
+Y.pls <- Y.spatrf.cv <- Y.spatrf.pl <- Y.tprs <- Y.tprs.rf <- Y.rf <- Y.rf.tprs <- rep(NA, n)
+
+numfold <- 10
+grid <- list(lambert_x = plltnt.mat$lambert_x,
+             lambert_y = plltnt.mat$lambert_y)
+# coords1 <- list(x = scale(grid$lambert_x, scale = FALSE) / 1e6, 
+#                 y = scale(grid$lambert_y, scale = FALSE) / 1e6)
+smpl <- sample(n)
+ind.stop <- round(n/numfold*1:numfold)
+ind.strt <- c(1,ind.stop[1:numfold-1]+1)
+
+#fold = 1
+
+run = function(fold){
+  cv.ind.i <- c(smpl[(ind.strt[fold]:ind.stop[fold])])
+  n.test <- length(cv.ind.i)
+  n.train <- n-n.test
+  Y.train <- annavg[-cv.ind.i]
+  Y.test <- annavg[cv.ind.i]
+  
+  ## Standardize Coordinates
+  train.coords <- cbind(grid$lambert_x[-cv.ind.i],grid$lambert_y[-cv.ind.i])
+  scale.params <- cbind(apply(train.coords,2,mean),apply(train.coords,2,sd))
+  x1train <- train.coords[,1] <- (train.coords[,1] - scale.params[1,1])/scale.params[1,2]
+  x2train <-train.coords[,2] <- (train.coords[,2] - scale.params[2,1])/scale.params[2,2]
+  test.coords <- cbind(grid$lambert_x[cv.ind.i],grid$lambert_y[cv.ind.i])
+  x1test <- test.coords[,1] <- (test.coords[,1] - scale.params[1,1])/scale.params[1,2]
+  x2test <- test.coords[,2] <- (test.coords[,2] - scale.params[2,1])/scale.params[2,2]
+  # train.coords <- cbind(coords1$x[-cv.ind.i],coords1$y[-cv.ind.i])
+  # x1train <- train.coords[,1]
+  # x2train <-train.coords[,2]
+  # test.coords <- cbind(coords1$x[cv.ind.i],coords1$y[cv.ind.i])
+  # x1test <- test.coords[,1]
+  # x2test <- test.coords[,2]
+  
+  cleaned <- cleanGIS(as.matrix(X[-cv.ind.i,]),
+                      as.matrix(X[cv.ind.i,]),
+                      rm.outliers = FALSE)
+  X.train <- cleaned$X
+  X.test <- cleaned$X.test
+  
+  dmat <- as.matrix(SpatioTemporal::crossDist(train.coords))^2
+  dtestmat <- as.matrix(SpatioTemporal::crossDist(test.coords,train.coords))^2
+  
+  # UK - PLS
+  strt <- proc.time()
+  
+  cleaned_for_pc <- cleanGIS(as.matrix(X[-cv.ind.i,]),
+                             as.matrix(X[cv.ind.i,]),
+                             rm.outliers = FALSE)
+  X.train.pc <- cleaned_for_pc$X
+  X.test.pc <- cleaned_for_pc$X.test
+  
+  num.pcs <- 1:5
+  pc.pars <- matrix(NA,ncol=length(num.pcs),nrow=3)
+  for(i in num.pcs){
+    pc.obj <- get.pcs(X.train.pc,"pls",i,Y.train)
+    strt.vl <- optim(# c(1,-1,1), # c(-1, -2, 2), 
+                     c(0, 0, 0), logLikeExp,method="L-BFGS-B",
+                     # lower=c(-30,-20,-10), upper =c(15,15,30),
+                     lower=c(-5,-5,-5), upper =c(5,5,5),
+                     y=Y.train, dist.mat=dmat, x=pc.obj$X)
+    pc.pars[,which(num.pcs==i)] <- strt.vl$par
+  }
+  cv.pcs.pls <- cv.pcr.exp(X.train.pc, Y.train, dmat, cv.pcs = num.pcs, k = 10, 
+                           method="pls",pars.init = pc.pars)
+  pc.obj <- get.pcs(X.train.pc,"pls",cv.pcs.pls$opt.pcs,Y.train)
+  
+  new.x.train <- pc.obj$X
+  means<-apply(X.train.pc,2,mean)
+  mean.matrix<-matrix(rep(means,n.test),nrow=n.test,byrow=T)
+  sds <- apply(X.train.pc,2,sd)
+  new.x.test <- (X.test.pc - mean.matrix) %*% diag(1/sds) %*% pc.obj$proj
+  
+  theta.pls <- pc.pars[,which(num.pcs==cv.pcs.pls$opt.pcs)]
+  
+  sig.pls <- exp(theta.pls[1])
+  nug.pls <- exp(theta.pls[2])
+  range.pls <- exp(theta.pls[3])
+  
+  i.V <- .fastSolve(sig.pls * exp(-dmat/range.pls) + 
+                      nug.pls * diag(length(Y.train)))
+  beta.hat.pcr <- solve(t(new.x.train) %*% i.V %*% new.x.train,
+                        t(new.x.train) %*% i.V %*% Y.train)
+  Y.pls[cv.ind.i]<- c(new.x.test %*% beta.hat.pcr) + 
+    sig.pls * exp(-dtestmat/range.pls) %*% i.V %*% 
+    c(Y.train-c(new.x.train %*% beta.hat.pcr))
+  
+  pls.time <- proc.time()-strt
+  
+  # spatial RF
+  strt <- proc.time()
+  
+  cv_obj <- cvSpatRF(Y=Y.train,X=X.train,coords=train.coords,
+                     cv.lambda=seq(.1, .9, by = .1),#expit(seq(-2,4,1/3)),
+                     cov.type="TPRS", #cov.opts=list(k=0,m=2),
+                     cov.opts=list(k=0,m=2), lklhd=TRUE,
+                     Xtest = X.test, replace=TRUE,
+                     coords.test = test.coords, t = 500, 
+                     var.imp=FALSE,imp.msr = "perm")
+  
+  Y.spatrf.cv[cv.ind.i] <- cv_obj$spatRF$ftest + cv_obj$spatRF$ztest
+  
+  fullspatbas <- .makeSpatBas(pars=list(psill=cv_obj$lambda.lklhd,
+                                        nugget=1-cv_obj$lambda.lklhd),
+                              coords.train=train.coords,
+                              coords.test = test.coords,
+                              cov.type="TPRS",# cov.opts = list(k=0,m=2),
+                              cov.opts = list(k=0,m=2))
+  
+  beta.hat <- solve(t(train.coords) %*% fullspatbas$i.sig %*% train.coords,
+                    t(train.coords) %*% fullspatbas$i.sig %*% 
+                      (Y.train - cv_obj$spatRF.lklhd$fpredicted ) )
+  Y.spatrf.pl[cv.ind.i] <- predict.cor( cv_obj$spatRF.lklhd$ftest + 
+                                          test.coords%*% beta.hat, 
+                                        Y.train - train.coords %*% beta.hat - 
+                                          cv_obj$spatRF.lklhd$fpredicted, 
+                                        theta = cv_obj$lambda.lklhd, 
+                                        R.test=fullspatbas$sig.test, 
+                                        i.sig = fullspatbas$i.sig )
+  
+  spatrf.time <- proc.time()-strt
+  
+  # TPRS
+  strt <- proc.time()
+  m <- 2
+  # m <- 3
+  mod <- mgcv::gam(Y.train~s(x1train,x2train,bs="tp",k=n.train,m=m))
+  Y.tprs[cv.ind.i] <- predict(mod,data.frame(x1train=x1test,x2train=x2test))
+  tprs.time <- proc.time() - strt
+  
+  # TPRS - RF
+  strt <- proc.time()
+  tprs.rf.mod <- randomForest(X.train,mod$residuals,xtest=X.test,
+                              nodesize=5,importance = FALSE)
+  Y.tprs.rf[cv.ind.i] <- Y.tprs[cv.ind.i] + tprs.rf.mod$test$predicted
+  tprs.rf.time <- tprs.time + proc.time()-strt
+  
+  # RF; RF - TPRS
+  strt <- proc.time()
+  rf <- randomForest(X.train,Y.train,xtest=X.test,nodesize=5,importance = FALSE)
+  mod <- mgcv::gam((Y.train-rf$predicted)~s(x1train,x2train,bs="tp",k=n.train,m=m,fx=FALSE))
+  Y.rf.tprs[cv.ind.i]<- rf$test$predicted+ predict(mod,data.frame(x1train=x1test,x2train=x2test))
+  Y.rf[cv.ind.i] <- rf$test$predicted
+  rf.time <- proc.time()-strt
+  
+  return(list(# pls-uk
+         Y.pls = Y.pls, beta.hat.pls = beta.hat.pcr,
+         pc.obj = pc.obj, theta.pls = theta.pls, pls.time = pls.time,
+         # spat RF
+         spatrf.varnames = colnames(X.train),
+         Y.spatrf.cv = Y.spatrf.cv, spatrf.cv.obj = cv_obj,
+         Y.spatrf.pl = Y.spatrf.pl, beta.hat.spatrf = beta.hat, spatrf.time = spatrf.time,
+         # RF and/or TPRS
+         Y.tprs = Y.tprs, Y.tprs.rf = Y.tprs.rf, Y.rf = Y.rf, Y.rf.tprs = Y.rf.tprs,
+         tprs.time = tprs.time, tprs.rf.time = tprs.rf.time, rf.time = rf.time
+         ))
+}
+
+numCores=detectCores()
+rslt <- mclapply(1:numfold, run, mc.cores = numfold)
+
+save.image("syn_rslt_new_corr_full2.RData")
+save(rslt, annavg, file = "syn_rslt_new_corr2.RData")

@@ -1,0 +1,26 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1609994454641.000,
+    "dirty" : false,
+    "encoding" : "ISO8859-1",
+    "folds" : "447|58|527|0|\n",
+    "hash" : "2906794234",
+    "id" : "7FED7D3A",
+    "lastKnownWriteTime" : 1613604347,
+    "last_content_update" : 1613687003406,
+    "path" : "C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap/summary.Rmd",
+    "project_path" : "summary.Rmd",
+    "properties" : {
+        "cursorPosition" : "559,76",
+        "last_setup_crc32" : "ACC5FE7548085f1e",
+        "scrollLine" : "546"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 7,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_markdown"
+}

@@ -1,0 +1,398 @@
+---
+title: "TRAP model: grid predictions and variable importance plots"
+author: "Si Cheng"
+date: ' `r Sys.Date()` '
+output: 
+  html_document:
+    number_sections: no
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+load("rslt_grid_uw_mean.RData")
+grid.bc.uw.mean = grid.bc.uw
+grid.ufp.uw.mean = grid.ufp.uw
+load("rslt_grid_uw2.RData")
+pls.bc.uw.mean = grid.bc.uw
+pls.ufp.uw.mean = grid.ufp.uw
+load("rslt_grid_uw.RData")
+grid.bc.uw$Y.pls.mean = pls.bc.uw.mean$Y.pls.mean
+grid.ufp.uw$Y.pls.mean = pls.ufp.uw.mean$Y.pls.mean
+grid.bc.uw$Y.pls.cov = pls.bc.uw.mean$Y.pls - pls.bc.uw.mean$Y.pls.mean
+grid.ufp.uw$Y.pls.cov = pls.ufp.uw.mean$Y.pls - pls.ufp.uw.mean$Y.pls.mean
+```
+
+## Grid predictions
+```{r, fig.width=16, fig.height=12}
+library(sf)
+library(tidyverse)
+library(ggmap)
+library(grid)
+library(ggplot2)
+library(gridExtra)
+
+project_crs <- 4326
+study_area_shp <- read_sf("oval_shp/oval_around_monitoring_area.shp") %>% 
+  st_transform(project_crs)
+
+grid_covars_shp <- cov_grid %>%
+  st_as_sf(., coords=c("longitude","latitude"), remove = FALSE,
+           crs=project_crs)
+grid_covars_shp$in_study_area <- st_intersects(grid_covars_shp, study_area_shp,
+                                               sparse = FALSE) %>%
+  apply(., 1, any)
+
+
+seaMap <- get_map(location=c(min(cov_grid$longitude), min(cov_grid$latitude),
+                            max(cov_grid$longitude), max(cov_grid$latitude)),
+                 source="stamen", maptype = "terrain", crop=FALSE)
+#seaMap2 <- get_map(location=c(min(cov_grid$longitude), min(cov_grid$latitude),
+#                            max(cov_grid$longitude), max(cov_grid$latitude)),
+#                   source = "stamen", maptype = "watercolor", crop=FALSE)
+
+plot_pred = function(mod, mod.mean, title){
+  mod$Y.pls = mod$Y.pls[grid_covars_shp$in_study_area]
+  mod$Y.spatrf.pl = mod$Y.spatrf.pl[grid_covars_shp$in_study_area]
+  mod$Y.spatrf.cv = mod$Y.spatrf.cv[grid_covars_shp$in_study_area]
+  mod$Y.tprs = mod$Y.tprs[grid_covars_shp$in_study_area]
+  mod$Y.tprs.rf = mod$Y.tprs.rf[grid_covars_shp$in_study_area]
+  mod$Y.rf = mod$Y.rf[grid_covars_shp$in_study_area]
+  mod$Y.rf.tprs = mod$Y.rf.tprs[grid_covars_shp$in_study_area]
+  mod$Y.pls.mean = mod$Y.pls.mean[grid_covars_shp$in_study_area]
+  mod$Y.pls.cov = mod$Y.pls.cov[grid_covars_shp$in_study_area]
+  mod.mean$Y.spatrf.pl = mod.mean$Y.spatrf.pl[grid_covars_shp$in_study_area]
+  mod.mean$Y.spatrf.cv = mod.mean$Y.spatrf.cv[grid_covars_shp$in_study_area]
+  
+  plot_range = range(c(mod$Y.pls, mod$Y.spatrf.pl, mod$Y.spatrf.cv,
+                       mod$Y.tprs, mod$Y.tprs.rf, mod$Y.rf, mod$Y.rf.tprs,
+                       mod.mean$Y.spatrf.pl, mod.mean$Y.spatrf.cv,
+                       mod$Y.pls.cov))#,
+                       #mod$Y.pls.mean))
+  temp = data.frame(longitude.x = cov_grid$longitude[grid_covars_shp$in_study_area], 
+                    latitude.x = cov_grid$latitude[grid_covars_shp$in_study_area],
+                    Y.pls = mod$Y.pls, Y.spatrf.pl = mod$Y.spatrf.pl,
+                    Y.spatrf.cv = mod$Y.spatrf.cv, Y.tprs = mod$Y.tprs,
+                    Y.tprs.rf = mod$Y.tprs.rf, Y.rf = mod$Y.rf, 
+                    Y.rf.tprs = mod$Y.rf.tprs, 
+                    Y.spatrf.cv.mean = mod.mean$Y.spatrf.cv,
+                    Y.spatrf.pl.mean = mod.mean$Y.spatrf.pl,
+                    Y.pls.mean = mod$Y.pls.mean,
+                    Y.pls.cov = mod$Y.pls.cov)
+  
+  p_pls = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.pls)) + #size = Y.pls
+            #scale_color_viridis_c(option = "plasma", name = "", 
+            #                      limits = plot_range, alpha = .8) +
+            scale_color_gradient(low = "white", high = "red",
+                                 name = "", limits = plot_range) +
+            ggtitle("UK PLS") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+  p_pls.mean = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.pls.mean)) + #size = Y.pls
+            #scale_color_viridis_c(option = "plasma", name = "", 
+            #                      limits = plot_range, alpha = .8) +
+            scale_color_gradient(low = "white", high = "red", name = "") +
+                                 #name = "", limits = plot_range) +
+            ggtitle("UK PLS (Mean)") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+  p_pls.cov = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.pls.cov)) + #size = Y.pls
+            #scale_color_viridis_c(option = "plasma", name = "", 
+            #                      limits = plot_range, alpha = .8) +
+            scale_color_gradient(low = "white", high = "red",
+                                 name = "", limits = plot_range) +
+            ggtitle("UK PLS (Cov)") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+  p_spatrf.pl = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.spatrf.pl)) + #size = Y.pls
+            scale_color_gradient(low = "white", high = "red",
+                                 name = "", limits = plot_range) +
+            #geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+            #                 color = res.pls, size = abs(res.pls))) +
+            #scale_color_gradient2(name = "", limits = c(lower, upper)) +
+            ggtitle("SpatRF-PL") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+  p_spatrf.cv = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.spatrf.cv)) + #size = Y.pls
+            scale_color_gradient(low = "white", high = "red",
+                                 name = "", limits = plot_range) +
+            #geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+            #                 color = res.pls, size = abs(res.pls))) +
+            #scale_color_gradient2(name = "", limits = c(lower, upper)) +
+            ggtitle("SpatRF-CV") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+  p_tprs = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.tprs)) + #size = Y.pls
+            scale_color_gradient(low = "white", high = "red",
+                                 name = "", limits = plot_range) +
+            #geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+            #                 color = res.pls, size = abs(res.pls))) +
+            #scale_color_gradient2(name = "", limits = c(lower, upper)) +
+            ggtitle("TPRS") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+  p_rf = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.rf)) + #size = Y.pls
+            scale_color_gradient(low = "white", high = "red",
+                                 name = "", limits = plot_range) +
+            ggtitle("RF") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+  p_tprs.rf = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.tprs.rf)) + #size = Y.pls
+            scale_color_gradient(low = "white", high = "red",
+                                 name = "", limits = plot_range) +
+            ggtitle("TPRS-RF") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+  p_rf.tprs = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.rf.tprs)) + #size = Y.pls
+            scale_color_gradient(low = "white", high = "red",
+                                 name = "", limits = plot_range) +
+            ggtitle("RF-TPRS") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+  
+  p_spatrf.pl.mean = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.spatrf.pl.mean)) + #size = Y.pls
+            scale_color_gradient(low = "white", high = "red",
+                                 name = "", limits = plot_range) +
+            #geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+            #                 color = res.pls, size = abs(res.pls))) +
+            #scale_color_gradient2(name = "", limits = c(lower, upper)) +
+            ggtitle("SpatRF-PL (Mean)") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+  p_spatrf.cv.mean = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.spatrf.cv.mean)) + #size = Y.pls
+            scale_color_gradient(low = "white", high = "red",
+                                 name = "", limits = plot_range) +
+            #geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+            #                 color = res.pls, size = abs(res.pls))) +
+            #scale_color_gradient2(name = "", limits = c(lower, upper)) +
+            ggtitle("SpatRF-CV (Mean)") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+  grid.arrange(arrangeGrob(p_rf, p_tprs, p_tprs.rf, p_rf.tprs, 
+                           p_spatrf.pl, p_spatrf.cv, 
+                           p_spatrf.pl.mean, p_spatrf.cv.mean, 
+                           p_pls, p_pls.mean, p_pls.cov,
+                           nrow=3),
+               top = textGrob(title,gp=gpar(fontsize=30)))
+}
+plot_pred(grid.ufp.uw, grid.ufp.uw.mean, "UFP (unweighted)")
+plot_pred(grid.bc.uw, grid.bc.uw.mean, "BC (unweighted)")
+```
+
+### Pairwise scatterplot of predicted values
+
+```{r}
+# pairs(abs(imp.ufp.primary), pch = 19, main = "UFP (adjusted)",
+#       labels = c("PLS", "PLS-indep", "SpatRF-CV", "SpatRF-PL", "RF"))
+twolines = function(x,y) {
+    points(x,y,pch=".")
+    abline(a=0,b=1,col="red")
+}
+
+pairs(cbind(grid.ufp.uw$Y.pls[grid_covars_shp$in_study_area],
+            pls.ufp.uw.mean$Y.pls.mean[grid_covars_shp$in_study_area],
+            grid.ufp.uw$Y.spatrf.cv[grid_covars_shp$in_study_area],
+            grid.ufp.uw$Y.spatrf.pl[grid_covars_shp$in_study_area],
+            grid.ufp.uw$Y.rf[grid_covars_shp$in_study_area],
+            grid.ufp.uw$Y.rf.tprs[grid_covars_shp$in_study_area]), 
+      panel = twolines, main = "Predictions: UFP (unweighted)", 
+      labels = c("PLS", "PLS (mean)", "SpatRF-CV", "SpatRF-PL", "RF", "RF-TPRS"))
+# pairs(abs(imp.bc.primary), pch = 19, main = "BC (adjusted)",
+#       labels = c("PLS", "PLS-indep", "SpatRF-CV", "SpatRF-PL", "RF"))
+pairs(cbind(grid.bc.uw$Y.pls[grid_covars_shp$in_study_area],
+            pls.bc.uw.mean$Y.pls.mean[grid_covars_shp$in_study_area],
+            grid.bc.uw$Y.spatrf.cv[grid_covars_shp$in_study_area],
+            grid.bc.uw$Y.spatrf.pl[grid_covars_shp$in_study_area],
+            grid.bc.uw$Y.rf[grid_covars_shp$in_study_area],
+            grid.bc.uw$Y.rf.tprs[grid_covars_shp$in_study_area]), 
+      panel = twolines, main = "Predictions: BC (unweighted)", 
+      labels = c("PLS", "PLS (mean)", "SpatRF-CV", "SpatRF-PL", "RF", "RF-TPRS"))
+```
+
+```{r, fig.height=12, fig.width=15}
+## header: ## Plots of some covariates
+
+# plot_covariate = function(name, title, takeLog = TRUE){
+#   dat_temp = cov_grid
+#   dat_temp$obs = cov_grid[,which(colnames(cov_grid) == name)]
+#   if (takeLog) dat_temp$obs = log(dat_temp$obs + 1)
+#   p_cov = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+#             geom_point(data = dat_temp, aes(x = longitude, y = latitude, 
+#                              color = obs)) + #, size = obs
+#             scale_color_viridis_c(option = "plasma", name = "") +# + upper)) + 
+#             guides(size = FALSE) + ggtitle(title) +
+#             theme(plot.margin=unit(rep(0,4), "pt"), 
+#                   text = element_text(size = 16))
+#   p_cov
+# }
+# pcov1 = plot_covariate("tl_s01000", "Truck routes (log), buffer = 1km", TRUE)
+# pcov2 = plot_covariate("log_m_to_truck", "Distance to truck routes (log)", FALSE)
+# pcov3 = plot_covariate("ll_a1_s05000", "A1 roads (log), buffer = 5km", TRUE)
+# pcov4 = plot_covariate("log_m_to_a1", "Distance to A1 roads (log)", FALSE)
+# pcov5 = plot_covariate("log_m_to_a1_a3_intersect", 
+#                        "Distance to A1 A3 intersection (log)", FALSE)
+# pcov6 = plot_covariate("elev_elevation", "Elevation", FALSE)
+# grid.arrange(arrangeGrob(pcov1, pcov2, pcov3, pcov4, pcov5, pcov6, nrow=2))
+```
+
+
+## Variable importance plots
+The plots below visualize the ``importance'' of each predictor, defined as
+
+* PLS: linear combination of loadings based on PLS regression parameters
+* SpatRF: proportion of loss accounted for by making splits based on each variable
+
+```{r, fig.height=10, fig.width=15}
+load("pred_grid_imp.RData")
+
+getImp = function(rslt, y){
+  pls.loadings = rslt$pc.obj$loadings
+  new.x.train <- rslt$pc.obj$X
+  theta.pls <- rslt$theta.pls
+  sig.pls <- exp(theta.pls[1])
+  nug.pls <- exp(theta.pls[2])
+  range.pls <- exp(theta.pls[3])
+  
+  train.coords <- cbind(dat$lambert_x, dat$lambert_y)
+  scale.params <- cbind(apply(train.coords,2,mean),apply(train.coords,2,sd))
+  train.coords[,1] <- (train.coords[,1] - scale.params[1,1])/scale.params[1,2]
+  train.coords[,2] <- (train.coords[,2] - scale.params[2,1])/scale.params[2,2]
+  
+  dmat <- as.matrix(SpatioTemporal::crossDist(train.coords))
+  i.V <- .fastSolve(sig.pls * exp(-dmat/range.pls) + 
+                      nug.pls * diag(length(y)))
+  beta.hat.pcr = solve(t(new.x.train) %*% i.V %*% new.x.train,
+                        t(new.x.train) %*% i.V %*% y)
+  beta.hat.indep = solve(t(new.x.train) %*% new.x.train,
+                        t(new.x.train) %*% y)
+  imp.pls = rslt$pc.obj$proj %*% beta.hat.pcr
+  #imp.pls = pls.loadings %*% beta.hat.pcr
+  imp.pls.indep = coef(pls::plsr(y ~ as.matrix(X),
+                  ncomp = ncol(rslt$pc.obj$loadings),scale=TRUE),
+                  ncomp = ncol(rslt$pc.obj$loadings))
+  # imp.pls.indep2 = rslt$pc.obj$proj %*% beta.hat.indep
+  # imp.pls.indep = pls.loadings %*% beta.hat.indep
+  imp.spatrf.cv = rslt$spatrf.cv$var.imp
+  imp.spatrf.pl = rslt$spatrf.pl$var.imp
+  imp.rf = rslt$rf.imp[,2]
+  return(imp = cbind(imp.pls, imp.pls.indep, imp.spatrf.cv, 
+                     imp.spatrf.pl, imp.rf))
+}
+
+imp.ufp.primary = getImp(grid.ufp.primary, dat$ufp_primary)
+imp.ufp.uw = getImp(grid.ufp.uw, dat$ufp_uw)
+imp.bc.primary = getImp(grid.bc.primary, dat$bc_primary)
+imp.bc.uw = getImp(grid.bc.uw, dat$bc_uw)
+
+plotImp = function(impMat, tt){
+  my.alpha = .3
+  colnames(impMat) = c("Method PLS", "Method PLS-Indep", 
+                       "Method SpatRF-CV", "Method SpatRF-PL", "Method RF")
+  
+  split_cov_name <- function(dt, cov) {
+    dt <- suppressWarnings(dt %>%
+                             rename(cov_full_name = cov) %>%
+                             mutate(
+                               buffer = substr(cov_full_name, nchar(cov_full_name)-4, nchar(cov_full_name)),
+                               buffer = as.numeric(ifelse(!is.na(as.integer(buffer)), buffer, NA)),
+                               cov = ifelse(is.na(buffer), cov_full_name, substr(cov_full_name, 1, nchar(cov_full_name)-5) )
+                             )
+    ) %>%
+      select(contains("cov"), buffer, everything())
+    
+    # elevation
+    dt$cov[grepl("^elev_.+_above$", dt$cov_full_name)] <- "elev_above"
+    dt$cov[grepl("^elev_.+_below$", dt$cov_full_name)] <- "elev_below"
+    dt$cov[grepl("^elev_.+_stdev$", dt$cov_full_name)] <- "elev_stdev"
+    dt$cov[grepl("^elev_.+_at_elev$", dt$cov_full_name)] <- "elev_at_elev"
+    
+    dt$buffer[grepl("_1k_", dt$cov_full_name)] <- 1000
+    dt$buffer[grepl("_5k_", dt$cov_full_name)] <- 5000
+    
+    return(dt)
+  }
+  
+  impMat = as.matrix(impMat)
+  rownames(impMat) = colnames(X)
+  dtNew <- impMat %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "cov") %>%
+    # rename variables if buffers
+    split_cov_name(cov = "cov") %>%
+      #make long format for faceting
+      gather(key = "Method", value = "Importance", contains("Method")) %>%
+      mutate(Method = substr(Method, 8, nchar(Method))) 
+  #colnames(dtNew)[4] = "Importance"
+  
+  dtNew  %>%
+    #buffered covariates
+    drop_na(buffer) %>%
+    ggplot(aes(x = Importance, y = cov)) +
+    geom_point(aes(size=buffer),
+               shape=1,
+               alpha=my.alpha) +
+    scale_size(breaks = c(min(dtNew$buffer, na.rm = T),
+                          max(dtNew$buffer, na.rm = T)
+    )) + #500, 5000, 10000,
+    #non-buffered covariates
+    geom_point(data = dtNew[is.na(dtNew$buffer),],
+               alpha=my.alpha,
+               aes(shape="")) +
+    geom_vline(xintercept=0,
+               linetype="solid",
+               alpha=my.alpha) +
+    facet_wrap(~ Method, scales = "free_x",
+                 labeller = "label_both",
+                 nrow = 1) +
+    labs(y = "Geocovariate",
+         shape= "non-buffer", #"proximity,\nelevation",
+         #title = paste("PLS Importance:", pollutant)) +
+         title = tt) +
+    theme(legend.position = "bottom", text = element_text(size = 16))
+}
+
+
+#plotImp(imp.ufp.primary, "UFP (adjusted)")
+plotImp(imp.ufp.uw, "UFP (unweighted)")
+#plotImp(imp.bc.primary, "BC (adjusted)")
+plotImp(imp.bc.uw, "BC (unweighted)")
+```
+
+### Pairwise scatterplot of variable importance
+
+Absolute values were taken for PLS importance measures.
+
+```{r}
+# pairs(abs(imp.ufp.primary), pch = 19, main = "VIP: UFP (adjusted)",
+#       labels = c("PLS", "PLS-indep", "SpatRF-CV", "SpatRF-PL", "RF"))
+pairs(abs(imp.ufp.uw), pch = 19, main = "VIP: UFP (unweighted)",
+      labels = c("PLS", "PLS-indep", "SpatRF-CV", "SpatRF-PL", "RF"))
+# pairs(abs(imp.bc.primary), pch = 19, main = "VIP: BC (adjusted)",
+#       labels = c("PLS", "PLS-indep", "SpatRF-CV", "SpatRF-PL", "RF"))
+pairs(abs(imp.bc.uw), pch = 19, main = "VIP: BC (unweighted)",
+      labels = c("PLS", "PLS-indep", "SpatRF-CV", "SpatRF-PL", "RF"))
+```

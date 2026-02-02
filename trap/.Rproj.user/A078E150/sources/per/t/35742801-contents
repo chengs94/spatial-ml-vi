@@ -1,0 +1,74 @@
+
+R version 3.6.1 (2019-07-05) -- "Action of the Toes"
+Copyright (C) 2019 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+[Previously saved workspace restored]
+
+> library(SpatioTemporal)
+Loading required package: Matrix
+> library(matrixStats)
+> library(pls)
+
+Attaching package: âplsâ
+
+The following object is masked from âpackage:statsâ:
+
+    loadings
+
+> library(inline)
+> # library(parallel)
+> # library(randomForest)
+> 
+> setwd("/home/users/chengsi/Desktop/exposurepred/national")
+> 
+> source("aux_functions.R")
+> source("spatTreeModified2.R")
+> 
+> # load("/home/users/chengsi/Desktop/exposurepred/spatRF/seeds3_s.RData")
+> load("/home/users/chengsi/Desktop/exposurepred/spatRF/syn_new_corr.RData")
+> load("/home/users/chengsi/Desktop/exposurepred/spatRF/syn_rslt_new_corr2.RData")
+> 
+> job_no = 4
+> # set.seed(job_no*5, kind="L'Ecuyer-CMRG")
+> # set.seed(3)
+> set.seed(233)
+> 
+> pollutant <- c("EC","OC","S","Si")[job_no]
+> plltnt.mat <- read.csv(paste0("data/", pollutant,".txt"))
+> plltnt.mat <- plltnt.mat[-which(plltnt.mat$native_id=="PHOE5"),]
+> 
+> if (pollutant %in% c("S","Si")){
++   annavg <- plltnt.mat[,2]
++   X <- plltnt.mat[,c(14:25,27:613)]
++ } else{
++   sum1 <- ifelse(is.na(plltnt.mat[,2]),0,plltnt.mat[,2]*plltnt.mat[,3])
++   obs1 <-  ifelse(is.na(plltnt.mat[,3]),0,plltnt.mat[,3])
++   sum2 <- ifelse(is.na(plltnt.mat[,5]),0,plltnt.mat[,5]*plltnt.mat[,6])
++   obs2 <- ifelse(is.na(plltnt.mat[,6]),0,plltnt.mat[,6])
++   annavg <- (sum1+sum2)/(obs1+obs2)
++   X <- plltnt.mat[,c(18:29,31:617)]
++ }
+> 
+> cleaned <- cleanGIS(as.matrix(X), NULL, rm.outliers = FALSE)
+> X0 = X
+> X = cleaned$X
+> 
+> # annavg <- sqrt(annavg)
+> annavg = y.err + y.mean - min(y.err + y.mean)
+Error in y.err + y.mean : non-numeric argument to binary operator
+Execution halted

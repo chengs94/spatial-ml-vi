@@ -1,0 +1,144 @@
+plotImp2 = function(impMat1, impMat2, impMat3, tt, n_top = 5, top_only = TRUE){
+  # my.alpha = .3
+  my.alpha = .8
+  
+  colnames(impMat1) = colnames(impMat2) = colnames(impMat3) =
+    c("Method UK-PLS", "Method SpatRF", "Method Truth")
+  
+  split_cov_name <- function(dt, cov) {
+    dt <- suppressWarnings(dt %>%
+                             rename(cov_full_name = cov) %>%
+                             mutate(
+                               buffer = substr(cov_full_name, nchar(cov_full_name)-4, nchar(cov_full_name)),
+                               buffer = as.numeric(ifelse(!is.na(as.integer(buffer)), buffer, NA)),
+                               cov = ifelse(is.na(buffer), cov_full_name, substr(cov_full_name, 1, nchar(cov_full_name)-5) )
+                             )
+    ) %>%
+      select(contains("cov"), buffer, everything())
+    
+    # elevation
+    dt$cov[grepl("^elev_.+_above$", dt$cov_full_name)] <- "elev_above"
+    dt$cov[grepl("^elev_.+_below$", dt$cov_full_name)] <- "elev_below"
+    dt$cov[grepl("^elev_.+_stdev$", dt$cov_full_name)] <- "elev_stdev"
+    dt$cov[grepl("^elev_.+_at_elev$", dt$cov_full_name)] <- "elev_at_elev"
+    
+    dt$buffer[grepl("_1k_", dt$cov_full_name)] <- 1000
+    dt$buffer[grepl("_5k_", dt$cov_full_name)] <- 5000
+    
+    return(dt)
+  }
+  
+  impMat = rbind(impMat1, impMat2, impMat3) %>% as.data.frame()
+  # impMat.std = rbind(impMat1.std, impMat2.std, impMat3.std) %>% as.data.frame()
+  impMat$Quantiles = rep(c("25% to 50%", "50% to 75%", "25% to 75%"), 
+                         each = nrow(impMat1))
+  impMat$Diff = abs(impMat[,1] - impMat[,2])
+  # impMat$Diff = abs(impMat.std[,1] - impMat.std[,2])
+  impMat$cov = rep(colnames(X), 3)
+  
+  # impMat_top = impMat %>% group_by(Quantiles) %>% 
+  #   slice_max(order_by = Diff, n = 5)
+  
+  #rownames(impMat) = rep(colnames(X), 3)
+  dtNew <- impMat %>%
+    as.data.frame() %>%
+    #rownames_to_column(var = "cov") %>%
+    # rename variables if buffers
+    split_cov_name(cov = "cov") %>%
+    #make long format for faceting
+    gather(key = "Method", value = "Importance", contains("Method")) %>%
+    mutate(Method = substr(Method, 8, nchar(Method))) 
+
+  if (top_only){
+    set1 = dtNew %>% filter(Quantiles == "25% to 50%" & Method == "UK-PLS") %>%
+      slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+    set2 = dtNew %>% filter(Quantiles == "50% to 75%" & Method == "UK-PLS") %>%
+      slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+    set3 = dtNew %>% filter(Quantiles == "25% to 75%" & Method == "UK-PLS") %>%
+      slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+    set1.2 = dtNew %>% filter(Quantiles == "25% to 50%" & Method == "SpatRF") %>%
+      slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+    set2.2 = dtNew %>% filter(Quantiles == "50% to 75%" & Method == "SpatRF") %>%
+      slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+    set3.2 = dtNew %>% filter(Quantiles == "25% to 75%" & Method == "SpatRF") %>%
+      slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+    set1.3 = dtNew %>% filter(Quantiles == "25% to 50%" & Method == "Truth") %>%
+      slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+    set2.3 = dtNew %>% filter(Quantiles == "50% to 75%" & Method == "Truth") %>%
+      slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+    set3.3 = dtNew %>% filter(Quantiles == "25% to 75%" & Method == "Truth") %>%
+      slice_max(order_by = abs(Importance), n = n_top) %>% select(cov) %>% c() %>% unlist()
+    # subset = set1 %>% union(set2) %>% union(set3)
+    subset = set1 %>% union(set2) %>% union(set3) %>% 
+      union(set1.2) %>% union(set2.2) %>% union(set3.2) %>%
+      union(set1.3) %>% union(set2.3) %>% union(set3.3)
+    dtNew = dtNew[dtNew$cov %in% subset, ] %>% arrange(cov)
+  }
+  
+  # dtNew$x1 = sign(dtNew$Importance) * log(abs(dtNew$Importance) + 1)
+  
+  dtNew %>%
+    #buffered covariates
+    drop_na(buffer) %>%
+    ggplot(aes(x = Importance, y = cov)) + # x = Importance
+    geom_point(aes(size=buffer, color = Method), shape=1, alpha=my.alpha) +
+    scale_x_continuous(trans = ssqrt_trans) +
+    scale_size(breaks = c(min(dtNew$buffer, na.rm = T),
+                          max(dtNew$buffer, na.rm = T))) + #500, 5000, 10000,
+    #non-buffered covariates
+    geom_point(data = dtNew[is.na(dtNew$buffer),],
+               alpha=my.alpha, aes(shape="", color = Method)) +
+    geom_vline(xintercept=0,
+               linetype="solid",
+               alpha=.3) +
+    scale_x_continuous(trans = ssqrt_trans) +
+    scale_y_discrete(labels=c("pop_s" = "Population", 
+                              "pop_dens" = "Population density", 
+                              "ndvi_summer_a" = "NDVI (summer)",
+                              "ndvi_q75_a" = "NDVI (annual 75%ile)",
+                              "ndvi_q50_a" = "NDVI (annual median)",
+                              "m_to_ry" = "Dist to railyard",
+                              "m_to_rr" = "Dist to railroad",
+                              "m_to_l_airp" = "Dist to large airport",
+                              "m_to_airp" = "Dist to airport",
+                              "m_to_a1" = "Dist to A1 road",
+                              "lu_transport_p" = "Transportation",
+                              "lu_resi_p" = "Residential",
+                              "lu_mix_urban_p" = "Mixed urban",
+                              "lu_industrial_p" = "Industrial",
+                              "lu_comm_p" = "Commercial",
+                              "lu_crop_p" = "Agricultural",
+                              "lu_green_p" = "Forest land",
+                              "ll_a3_s" = "A3 road length",
+                              "tl_s" = "Truck route length",
+                              "rlu_evergreen_p" = "Evergreen forest",
+                              "rlu_water_p" = "Water",
+                              "pop10_s" = "Population",
+                              "ll_a1_s" = "A1 road length",
+                              "ll_a23_s" = "A2,A3 road length",
+                              "rlu_dev_hi_p" = "Dev high intensity",
+                              "rlu_dev_med_p" = "Dev medium intensity",
+                              "log_m_to_ry" = "Log(dist) to railyard",
+                              "log_m_to_l_airp" = "Log(dist) to large airport",
+                              "log_m_to_airp" = "Log(dist) to airport",
+                              "log_m_to_m_port" = "Log(dist) to medium port",
+                              "log_m_to_a1" = "Log(dist) to A1 road",
+                              "log_m_to_a1_a1_intersect" = "Log(dist) to A1/A1 intersec",
+                              "log_m_to_a2_a3_intersect" = "Log(dist) to A2/A3 intersec",
+                              "log_m_to_a1_a3_intersect" = "Log(dist) to A1/A3 intersec",
+                              "log_m_to_truck" = "Log(dist) to truck route",
+                              "log_m_to_rr" = "Log(dist) to railroad",
+                              "imp_a" = "Impervious surface",
+                              "elev_elevation" = "Elevation",
+                              "elev_below" = "High relative elevation",
+                              "elev_at_elev" = "Intermediate relative elevation",
+                              "elev_above" = "Low relative elevation")) +
+    facet_wrap(~ Quantiles, scales = "fixed", # scales = "free_x",
+               labeller = "label_both",
+               nrow = 1) +
+    labs(y = "Geocovariate", x = "Predictor Contribution",
+         shape= "non-buffer", #"proximity,\nelevation",
+         #title = paste("PLS Importance:", pollutant)) +
+         title = tt) +
+    theme(legend.position = "bottom", text = element_text(size = 16))
+}

@@ -1,0 +1,27 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1606519893313.000,
+    "dirty" : false,
+    "encoding" : "ISO8859-1",
+    "folds" : "",
+    "hash" : "354170521",
+    "id" : "C0628FD0",
+    "lastKnownWriteTime" : 1606529273,
+    "last_content_update" : 1613288817935,
+    "path" : "C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/spatialRF/replicate_report.Rmd",
+    "project_path" : "replicate_report.Rmd",
+    "properties" : {
+        "cursorPosition" : "129,0",
+        "last_setup_crc32" : "",
+        "scrollLine" : "114",
+        "tempName" : "Untitled1"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 5,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_markdown"
+}

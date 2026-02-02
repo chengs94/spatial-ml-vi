@@ -1,0 +1,117 @@
+
+R version 3.6.1 (2019-07-05) -- "Action of the Toes"
+Copyright (C) 2019 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+[Previously saved workspace restored]
+
+> # variable importance assessed via leave-one-out prediction on MM data
+> 
+> library(SpatioTemporal)
+Loading required package: Matrix
+> library(matrixStats)
+> library(pls)
+
+Attaching package: ‘pls’
+
+The following object is masked from ‘package:stats’:
+
+    loadings
+
+> library(inline)
+> library(dplyr)
+
+Attaching package: ‘dplyr’
+
+The following object is masked from ‘package:matrixStats’:
+
+    count
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+> # library(randomForest)
+> # library(tidyverse)
+> # library(parallel)
+> 
+> # load CV result to get optimal tuning parameters
+> load("trap_cv_morepars_finer.RData")
+> load("trap_cv_morepars_finer2.RData")
+> load("mm_no2.RData")
+> load("mm_co2.RData")
+> load("mm_pm25.RData")
+> # readRDS("dat_updated.rda")
+> source("spatTreeModified2.R")
+> 
+> # numCores = detectCores() - 2
+> 
+> rslt.all = list(rslt.ufp.primary, rslt.ufp.uw, rslt.bc.primary, rslt.bc.uw,
++                 rslt.no2.uw, rslt.co2.uw, rslt.pm25.uw)
+> 
+> bestNumComp = rep(0, length(rslt.all))
+> bestPLpar = matrix(0, ncol = 4, nrow = length(rslt.all))
+> bestCVpar = matrix(0, ncol = 4, nrow = length(rslt.all))
+> #colnames(bestSpatrfPar) = c("lambda", "r", "m", "s")
+> 
+> set.seed(2333)
+> 
+> for (j in 1:length(rslt.all)){
++   for (k in 1:numfold){
++     bestNumComp[j] = bestNumComp[j] + ncol(rslt.all[[j]][[k]]$pc.obj$loadings)
++     bestCVpar[j,1] = bestCVpar[j,1] + rslt.all[[j]][[k]]$spatrf.cv.obj$lambda.min
++     bestCVpar[j,2] = bestCVpar[j,2] + rslt.all[[j]][[k]]$spatrf.cv.obj$r.min
++     bestCVpar[j,3] = bestCVpar[j,3] + rslt.all[[j]][[k]]$spatrf.cv.obj$m.min
++     bestCVpar[j,4] = bestCVpar[j,4] + rslt.all[[j]][[k]]$spatrf.cv.obj$s.min
++     bestPLpar[j,1] = bestPLpar[j,1] + rslt.all[[j]][[k]]$spatrf.cv.obj$lambda.lklhd
++     bestPLpar[j,2] = bestPLpar[j,2] + rslt.all[[j]][[k]]$spatrf.cv.obj$r.lklhd
++     bestPLpar[j,3] = bestPLpar[j,3] + rslt.all[[j]][[k]]$spatrf.cv.obj$m.lklhd
++     bestPLpar[j,4] = bestPLpar[j,4] + rslt.all[[j]][[k]]$spatrf.cv.obj$s.lklhd
++     print(j,k)
++   }
++ }
+[1] 1
+[1] 1
+[1] 1
+[1] 1
+[1] 1
+[1] 2
+[1] 2
+[1] 2
+[1] 2
+[1] 2
+[1] 3
+[1] 3
+[1] 3
+[1] 3
+[1] 3
+[1] 4
+[1] 4
+[1] 4
+[1] 4
+[1] 4
+[1] 5
+[1] 5
+[1] 5
+[1] 5
+[1] 5
+Error: $ operator is invalid for atomic vectors
+Execution halted

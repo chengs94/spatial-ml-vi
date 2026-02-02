@@ -1,0 +1,63 @@
+# exploratory analyses, plots, etc for the manuscript
+
+library(dplyr)
+# library(sf)
+library(ggmap)
+library(ggplot2)
+library(ggpubr)
+
+dat = readRDS("dat_updated.rda")
+
+seaMap <- get_map(location=c(min(dat$longitude), min(dat$latitude),
+                             max(dat$longitude), max(dat$latitude)),
+                  source="stamen", maptype = "terrain", crop=FALSE)
+
+p_ufp = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  geom_point(data = dat, aes(x = longitude, y = latitude, 
+                                color = exp(ufp_uw)/1000)) +
+  scale_color_viridis_c(option = "cividis", trans = "log",
+                        name = "1000pt/cm3", labels = scales::number_format(accuracy = 1)) +
+  guides(size = "none") + ggtitle("UFP") +
+  theme(plot.margin=unit(rep(0,4), "pt"), plot.title = element_text(size=16))
+
+p_bc = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  geom_point(data = dat, aes(x = longitude, y = latitude, 
+                             color = exp(bc_uw))) +
+  scale_color_viridis_c(option = "cividis", trans = "log",
+                        name = "ng/m3", labels = scales::number_format(accuracy = 1)) +
+  guides(size = "none") + ggtitle("BC") +
+  theme(plot.margin=unit(rep(0,4), "pt"), plot.title = element_text(size=16))
+
+p_no2 = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  geom_point(data = dat, aes(x = longitude, y = latitude, 
+                             color = exp(no2_uw))) +
+  scale_color_viridis_c(option = "cividis", trans = "log", name = "ppbv", 
+                        labels = scales::number_format(accuracy = 1)) +
+  guides(size = "none") + ggtitle("NO2") +
+  theme(plot.margin=unit(rep(0,4), "pt"), plot.title = element_text(size=16))
+
+p_co2 = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  geom_point(data = dat, aes(x = longitude, y = latitude, 
+                             color = exp(co2_uw))) +
+  scale_color_viridis_c(option = "cividis", trans = "log",
+                        name = "ppbv", labels = scales::number_format(accuracy = 1)) +
+  guides(size = "none") + ggtitle("CO2") +
+  theme(plot.margin=unit(rep(0,4), "pt"), plot.title = element_text(size=16))
+
+p_pm25 = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  geom_point(data = dat, aes(x = longitude, y = latitude, 
+                             color = exp(pm25_uw))) +
+  scale_color_viridis_c(option = "cividis", trans = "log",
+                        name = "ct/km", labels = scales::number_format(accuracy = 1)) +
+  guides(size = "none") + ggtitle("PM2.5") +
+  theme(plot.margin=unit(rep(0,4), "pt"), plot.title = element_text(size=16))
+
+# ggarrange(p_ufp, p_bc, p_no2, p_co2, p_pm25, 
+#           nrow = 1, ncol = 5, common.legend = FALSE, legend = "bottom") %>%
+#   annotate_figure(top = text_grob("Annual Average Pollutant Concentration, Seattle", 
+#                                   face = "bold", size = 16))
+
+ggarrange(p_ufp, p_pm25, 
+          nrow = 1, ncol =2, common.legend = FALSE, legend = "bottom") %>%
+  annotate_figure(top = text_grob("Annual Average Pollutant Concentration, Seattle", 
+                                  face = "bold", size = 16))

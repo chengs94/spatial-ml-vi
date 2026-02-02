@@ -1,0 +1,593 @@
+---
+title: "(New) Variable Importance Summary"
+author: "Si Cheng"
+date: ' `r Sys.Date()` '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Approach 1: Leaving out group of predictors
+
+One common measure of variable importance for random forests is the amount of loss in accuracy when a predictor is dropped/permuted. However, due to the (possibly high) correlation between predictors in our setting, dropping/permuting one predictor may not lead to a clear or meaningful difference in model performance. 
+
+We consider grouping the predictors via some clustering algorithm (e.g. k-means), leave out one group at a time and assess the change in accuracy. 
+
+```{r, include = FALSE}
+dat = readRDS("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap/dat.rda")
+set.seed(2333)
+
+n <- nrow(dat)
+
+numfold <- 5
+grid <- list(lambert_x = dat$lambert_x,
+             lambert_y = dat$lambert_y)
+
+X = dat[,-(1:21)]
+X.std = scale(X)
+
+set.seed(2333)
+n.centers = seq(3,20)
+ss.ratio = NULL
+for (j in 1:length(n.centers)){
+  clusters = kmeans(t(X), centers = n.centers[j], nstart = 20, iter.max = 20)
+  ss.ratio = c(ss.ratio, clusters$betweenss / clusters$totss)
+}
+
+plot(n.centers, ss.ratio, pch = 19,
+     xlab = "# centers", ylab = "Between-cluster SS / Total SS")
+lines(n.centers, ss.ratio)
+```
+
+We run k-means and compare the ratio of between-cluster sum of squares versus total sum of squares with the choices of 3, 4, ... 20 clusters. From the plot above, we observe that the choice of 4 clusters leads to the best clustering performance.
+
+```{r}
+clusters = kmeans(t(X), centers = 4, nstart = 20, iter.max = 20)
+knitr::kable(matrix(clusters$size, nrow = 1),
+             col.names = c("Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4"),
+             caption = "Size of clusters")
+```
+
+However, as illustrated in the table above, k-means clustering leads to highly unbalanced cluster sizes, and therefore less interpretable clusters. The clusters are:
+
+* Cluster 1: `r names(clusters$cluster[clusters$cluster == 1])`
+* Cluster 2: all predictors not in clusters 1, 3, 4
+* Cluster 3: `r names(clusters$cluster[clusters$cluster == 3])`
+* Cluster 4: `r names(clusters$cluster[clusters$cluster == 4])`
+
+We then explore hierarchical clustering to alleviate this issue. 
+
+```{r, fig.height=3, fig.width=4}
+library(cluster)
+library(factoextra)
+
+X = dat[,-(1:21)]
+X.std = scale(t(X))
+
+set.seed(2333)
+# optimal number of clusters: average linkage
+fviz_nbclust(X.std, FUN = hcut, method = "wss", hc_method = "average")
+
+# optimal number of clusters: complete linkage
+fviz_nbclust(X.std, FUN = hcut, method = "wss", hc_method = "complete")
+
+hclust_avg = hclust(dist(X.std, method = 'euclidean'), 
+                    method = 'average')
+cut_avg = cutree(hclust_avg, k = 2)
+
+hclust_complete = hclust(dist(X.std, method = 'euclidean'), 
+                    method = 'complete')
+cut_complete = cutree(hclust_complete, k = 2)
+```
+
+The optimal number of clusters was found to be 2 (by the elbow method) with both complete and average linkage, which may not lead to a meaningful interpretation on the importance of each individual predictor.
+
+## Approach 2: Changing predictor value from median
+
+We consider an alternative approach proposed during the group meeting on Oct 11. The idea was to fix each predictor at their median (one at a time), and see how the predicted values change after increasing/decreasing them by a certain magnitude.
+
+### UFP
+
+We follow this approach and explore variable importance for the prediction of UFP. The model was trained with all 309 locations from the mobile monitoring data, and assessed on 350 randomly sampled cohort locations (to reduce the amount of computation, since there were originally over 20k cohort locations). We compare the predicted values when each predictor takes their 12.5%, 25%, 37.5%, 50%, 62.5%, 75%, 87.5% quantiles.
+
+**The plots below show the average difference in predicted UFP concentration, when each predictor value changes from their 25% quantile to their 50% quantile, and from their 50% quantile to their 75% quantile, respectively.**
+
+```{r, fig.height=12, fig.width=15}
+library(tidyverse)
+
+load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap/varimp_new/varimp_cohort_diff.RData")
+
+cols = 1:ncol(X)
+qs = c(.125, .25, .375, .5, .625, .75, .875)
+
+avg.pls = avg.spatrf = avg.rf = avg.rf.tprs = matrix(NA, ncol = length(qs), nrow = ncol(X))
+k = 1
+
+for (i in 1:length(cols)){
+  for (j in 1:length(qs)){
+    avg.pls[i,j] = mean(pred.diff[[k]]$Y.pls)
+    avg.spatrf[i,j] = mean(pred.diff[[k]]$Y.spatrf.pl)
+    avg.rf[i,j] = mean(pred.diff[[k]]$Y.rf)
+    avg.rf.tprs[i,j] = mean(pred.diff[[k]]$Y.rf.tprs)
+    k = k + 1
+  }
+}
+
+plotImp = function(impMat, tt){
+  my.alpha = .3
+  colnames(impMat) = c("Method PLS", "Method SpatRF-PL", "Method RF", "Method RF-TPRS")
+  impMat = impMat[,c(1,2)]
+  
+  split_cov_name <- function(dt, cov) {
+    dt <- suppressWarnings(dt %>%
+                             rename(cov_full_name = cov) %>%
+                             mutate(
+                               buffer = substr(cov_full_name, nchar(cov_full_name)-4, nchar(cov_full_name)),
+                               buffer = as.numeric(ifelse(!is.na(as.integer(buffer)), buffer, NA)),
+                               cov = ifelse(is.na(buffer), cov_full_name, substr(cov_full_name, 1, nchar(cov_full_name)-5) )
+                             )
+    ) %>%
+      select(contains("cov"), buffer, everything())
+    
+    # elevation
+    dt$cov[grepl("^elev_.+_above$", dt$cov_full_name)] <- "elev_above"
+    dt$cov[grepl("^elev_.+_below$", dt$cov_full_name)] <- "elev_below"
+    dt$cov[grepl("^elev_.+_stdev$", dt$cov_full_name)] <- "elev_stdev"
+    dt$cov[grepl("^elev_.+_at_elev$", dt$cov_full_name)] <- "elev_at_elev"
+    
+    dt$buffer[grepl("_1k_", dt$cov_full_name)] <- 1000
+    dt$buffer[grepl("_5k_", dt$cov_full_name)] <- 5000
+    
+    return(dt)
+  }
+  
+  impMat = as.matrix(impMat)
+  rownames(impMat) = colnames(X)
+  dtNew <- impMat %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "cov") %>%
+    # rename variables if buffers
+    split_cov_name(cov = "cov") %>%
+      #make long format for faceting
+      gather(key = "Method", value = "Importance", contains("Method")) %>%
+      mutate(Method = substr(Method, 8, nchar(Method))) 
+  #colnames(dtNew)[4] = "Importance"
+  
+  dtNew  %>%
+    #buffered covariates
+    drop_na(buffer) %>%
+    ggplot(aes(x = Importance, y = cov)) +
+    geom_point(aes(size=buffer),
+               shape=1,
+               alpha=my.alpha) +
+    scale_size(breaks = c(min(dtNew$buffer, na.rm = T),
+                          max(dtNew$buffer, na.rm = T)
+    )) + #500, 5000, 10000,
+    #non-buffered covariates
+    geom_point(data = dtNew[is.na(dtNew$buffer),],
+               alpha=my.alpha,
+               aes(shape="")) +
+    geom_vline(xintercept=0,
+               linetype="solid",
+               alpha=my.alpha) +
+    facet_wrap(~ Method, scales = "free_x",
+                 labeller = "label_both",
+                 nrow = 1) +
+    labs(y = "Geocovariate",
+         shape= "non-buffer", #"proximity,\nelevation",
+         #title = paste("PLS Importance:", pollutant)) +
+         title = tt) +
+    theme(legend.position = "bottom", text = element_text(size = 16))
+}
+
+plotImp(cbind(avg.pls[,4] - avg.pls[,2], avg.spatrf[,4] - avg.spatrf[,2],
+              avg.rf[,4] - avg.rf[,2], avg.rf.tprs[,4] - avg.rf.tprs[,2]),
+        "Mean difference in prediction, 25% to 50% quantile, UFP")
+
+plotImp(cbind(avg.pls[,6] - avg.pls[,4], avg.spatrf[,6] - avg.spatrf[,4],
+              avg.rf[,6] - avg.rf[,4], avg.rf.tprs[,6] - avg.rf.tprs[,4]),
+        "Mean difference in prediction, 50% to 75% quantile, UFP")
+
+plotImp(cbind(avg.pls[,6] - avg.pls[,2], avg.spatrf[,6] - avg.spatrf[,2],
+              avg.rf[,6] - avg.rf[,2], avg.rf.tprs[,6] - avg.rf.tprs[,2]),
+        "Mean difference in prediction, 25% to 75% quantile, UFP")
+```
+Top predictors:
+
+* Based on difference from 25% to 50% quantile ($|\text{diff}| > 0.005$)
+  + UK-PLS:
+    - Positive: Length of A1 roads, length of truck routes, population
+    - Negative: Distance to (large) airports, distance to A1 roads/A1-A1 intersection/A1-A3 intersection
+  + SpatRF:
+    - Positive: Population
+    - Negative: Distance to A1-A3 intersection/A1 roads, distance to railroads, distance to truck routes, distance to ports
+    
+* Based on difference from 50% to 75% quantile ($|\text{diff}| > 0.005$), difference from above are highlighted
+  + UK-PLS:
+    - Positive: Length of A1 roads, length of truck routes, *highly-developed land use*, *imperviousness*
+    - Negative: *Evergreen forest land*, distance to large airports
+  + SpatRF:
+    - Positive: *Highly-developed land use*, *length of truck routes*, *length of A1 roads*, population
+    - Negative: *None*
+    
+* Based on difference from 25% to 75% quantile ($|\text{diff}| > 0.01$), difference from above are highlighted
+  + UK-PLS:
+    - Positive: Length of A1 roads, length of truck routes, highly-developed land use
+    - Negative: Distance to large airports, distance to A1-A1 intersections
+  + SpatRF:
+    - Positive: *None*
+    - Negative: Distance to A1-A3 intersections/A1 roads
+    
+Note that the relative importance of predictors of UK-PLS **changed** due to different concentration of predictors around their median. Therefore, the change from 25% to 50% quantile vs from 50% to 75% quantile may **not** correspond to the same quantity of difference for different predictors.
+
+On a higher level, for strong predictors that are correlated, e.g. length of A1 roads vs distance to A1 roads/intersections, SpatRF tends to highlight only one of them as important, while PLS could identify more than one.
+
+* Predictors identified as **important for UK-PLS but not for SpatRF**: Distance to (large) airports (-), distance to A1-A1 intersections (-)
+* Predictors identified as **important for SpatRF but not for UK-PLS**: None
+* Important predictors in common: Length of A1 roads (+), length of truck routes (+), highly-developed land use (+), distance to A1 roads (-), distance to A1-A3 intersections (-)
+
+We first compare the actual and predicted UFP concentration (log-transformed) versus the distance to (large) airports. Note that this was compared on the **mobile monitoring data (instead of cohort data)** because we do not have true UFP concentration observed for the latter.
+
+PLS identifies the distance to (large) airports as an important predictor while SpatRF not -- however, they both produce (comparably) large predictions near the airport.
+
+```{r, fig.width=20, fig.height=10}
+library(sf)
+library(ggmap)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+
+load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap/trap_cv_morepars_finer.RData")
+load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap/trap_cv_morepars_finer2.RData")
+
+for (j in 1:length(rslt.ufp.uw)){
+  idx = which(!is.na(rslt.ufp.uw[[j]]$Y.pls))
+  Y.pls[idx] = rslt.ufp.uw[[j]]$Y.pls[idx]
+  Y.spatrf.pl[idx] = rslt.ufp.uw[[j]]$Y.spatrf.pl[idx]
+}
+
+pairs(cbind(dat$log_m_to_l_airp, dat$ufp_uw, Y.pls, Y.spatrf.pl),
+      pch = 19, upper.panel = NULL, 
+      labels = c("Dist to large airport", "UFP", "PLS pred", "SpatRF pred"))
+
+pairs(cbind(dat$log_m_to_airp, dat$ufp_uw, Y.pls, Y.spatrf.pl),
+      pch = 19, upper.panel = NULL, 
+      labels = c("Dist to airport", "UFP", "PLS pred", "SpatRF pred"))
+
+seaMap <- get_map(location=c(min(dat$longitude.x), min(dat$latitude.x),
+                            max(dat$longitude.x), max(dat$latitude.x)),
+                 source="stamen", maptype = "terrain", crop=FALSE)
+
+summary_plots = function(cov, ufp_obs, pls_pred, spatrf_pred, cov_name){
+  dat_temp = cbind(dat, cov, ufp_obs, pls_pred, spatrf_pred)
+  
+  lims = range(dat_temp[, (ncol(dat_temp) - 2):ncol(dat_temp)])
+  
+  p_obs = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = dat_temp, aes(x = longitude.x, y = latitude.x, 
+                             color = ufp_obs, size = 1)) +
+            scale_color_viridis_c(option = "plasma", name = "",
+                                  limits = lims) +
+            guides(size = FALSE) + ggtitle("Observed") +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  
+  p_cov = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = dat_temp, aes(x = longitude.x, y = latitude.x, 
+                             color = cov, size = 1)) +
+            scale_color_viridis_c(option = "plasma", name = "") +
+            guides(size = FALSE) + ggtitle(cov_name) +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  
+  p_pls = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = dat_temp, aes(x = longitude.x, y = latitude.x, 
+                             color = pls_pred, size = 1)) +
+            scale_color_viridis_c(option = "plasma", name = "",
+                                  limits = lims) +
+            guides(size = FALSE) + ggtitle("PLS") +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  
+  p_spatrf.pl = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = dat_temp, aes(x = longitude.x, y = latitude.x, 
+                             color = spatrf_pred, size = 1)) +
+            scale_color_viridis_c(option = "plasma", name = "",
+                                  limits = lims) +
+            guides(size = FALSE) + ggtitle("SpatRF-PL") +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  
+  grid.arrange(arrangeGrob(p_cov, p_obs, p_pls, p_spatrf.pl, nrow=1))
+}
+
+summary_plots(dat$log_m_to_l_airp, dat$ufp_uw, Y.pls, Y.spatrf.pl, 
+             "Dist to large airport")
+
+summary_plots(dat$log_m_to_airp, dat$ufp_uw, Y.pls, Y.spatrf.pl, 
+             "Dist to airport")
+```
+
+Next, we look at UFP concentration versus the distance to A1-A1 intersections:
+
+```{r, fig.width = 20, fig.height=10}
+
+pairs(cbind(dat$log_m_to_a1_a1_intersect, dat$ufp_uw, Y.pls, Y.spatrf.pl),
+      pch = 19, upper.panel = NULL, 
+      labels = c("Dist to A1-A1 intersect", "UFP", "PLS pred", "SpatRF pred"))
+
+summary_plots(dat$log_m_to_a1_a1_intersect, dat$ufp_uw, Y.pls, Y.spatrf.pl, 
+             "Dist to A1-A1 intersect")
+```
+
+### BC
+
+```{r, echo = FALSE, fig.width=16, fig.height=15}
+
+load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap/varimp_new/bc_varimp_cohort_diff.RData")
+
+avg.pls = avg.spatrf = avg.rf = avg.rf.tprs = matrix(NA, ncol = length(qs), nrow = ncol(X))
+k = 1
+
+for (i in 1:length(cols)){
+  for (j in 1:length(qs)){
+    avg.pls[i,j] = mean(bc.pred.diff[[k]]$Y.pls)
+    avg.spatrf[i,j] = mean(bc.pred.diff[[k]]$Y.spatrf.pl)
+    avg.rf[i,j] = mean(bc.pred.diff[[k]]$Y.rf)
+    avg.rf.tprs[i,j] = mean(bc.pred.diff[[k]]$Y.rf.tprs)
+    k = k + 1
+  }
+}
+
+plotImp = function(impMat, tt){
+  my.alpha = .3
+  colnames(impMat) = c("Method PLS", "Method SpatRF-PL", "Method RF", "Method RF-TPRS")
+  # impMat = impMat[,c(1,2)]
+  
+  split_cov_name <- function(dt, cov) {
+    dt <- suppressWarnings(dt %>%
+                             rename(cov_full_name = cov) %>%
+                             mutate(
+                               buffer = substr(cov_full_name, nchar(cov_full_name)-4, nchar(cov_full_name)),
+                               buffer = as.numeric(ifelse(!is.na(as.integer(buffer)), buffer, NA)),
+                               cov = ifelse(is.na(buffer), cov_full_name, substr(cov_full_name, 1, nchar(cov_full_name)-5) )
+                             )
+    ) %>%
+      select(contains("cov"), buffer, everything())
+    
+    # elevation
+    dt$cov[grepl("^elev_.+_above$", dt$cov_full_name)] <- "elev_above"
+    dt$cov[grepl("^elev_.+_below$", dt$cov_full_name)] <- "elev_below"
+    dt$cov[grepl("^elev_.+_stdev$", dt$cov_full_name)] <- "elev_stdev"
+    dt$cov[grepl("^elev_.+_at_elev$", dt$cov_full_name)] <- "elev_at_elev"
+    
+    dt$buffer[grepl("_1k_", dt$cov_full_name)] <- 1000
+    dt$buffer[grepl("_5k_", dt$cov_full_name)] <- 5000
+    
+    return(dt)
+  }
+  
+  impMat = as.matrix(impMat)
+  rownames(impMat) = colnames(X)
+  dtNew <- impMat %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "cov") %>%
+    # rename variables if buffers
+    split_cov_name(cov = "cov") %>%
+      #make long format for faceting
+      gather(key = "Method", value = "Importance", contains("Method")) %>%
+      mutate(Method = substr(Method, 8, nchar(Method))) 
+  #colnames(dtNew)[4] = "Importance"
+  
+  dtNew  %>%
+    #buffered covariates
+    drop_na(buffer) %>%
+    ggplot(aes(x = Importance, y = cov)) +
+    geom_point(aes(size=buffer),
+               shape=1,
+               alpha=my.alpha) +
+    scale_size(breaks = c(min(dtNew$buffer, na.rm = T),
+                          max(dtNew$buffer, na.rm = T)
+    )) + #500, 5000, 10000,
+    #non-buffered covariates
+    geom_point(data = dtNew[is.na(dtNew$buffer),],
+               alpha=my.alpha,
+               aes(shape="")) +
+    geom_vline(xintercept=0,
+               linetype="solid",
+               alpha=my.alpha) +
+    facet_wrap(~ Method, scales = "free_x",
+                 labeller = "label_both",
+                 nrow = 1) +
+    labs(y = "Geocovariate",
+         shape= "non-buffer", #"proximity,\nelevation",
+         #title = paste("PLS Importance:", pollutant)) +
+         title = tt) +
+    theme(legend.position = "bottom", text = element_text(size = 16))
+}
+
+plotImp(cbind(avg.pls[,4] - avg.pls[,2], avg.spatrf[,4] - avg.spatrf[,2],
+              avg.rf[,4] - avg.rf[,2], avg.rf.tprs[,4] - avg.rf.tprs[,2]),
+        "Mean difference in prediction, 25% to 50% quantile, BC")
+
+plotImp(cbind(avg.pls[,6] - avg.pls[,4], avg.spatrf[,6] - avg.spatrf[,4],
+              avg.rf[,6] - avg.rf[,4], avg.rf.tprs[,6] - avg.rf.tprs[,4]),
+        "Mean difference in prediction, 50% to 75% quantile, BC")
+
+plotImp(cbind(avg.pls[,6] - avg.pls[,2], avg.spatrf[,6] - avg.spatrf[,2],
+              avg.rf[,6] - avg.rf[,2], avg.rf.tprs[,6] - avg.rf.tprs[,2]),
+        "Mean difference in prediction, 25% to 75% quantile, BC")
+```
+
+Top predictors:
+
+* Based on difference from 25% to 50% quantile ($|\text{diff}| > 0.005$)
+  + UK-PLS:
+    - Positive: Population, length of truck routes, length of A1 roads, imperviousness, elevation (low in relative sense)
+    - Negative: Elevation (high in relative sense), elevation (above sea level), distance to rail yards/railroads/truck routes
+  + SpatRF:
+    - Positive: Highly-developed land use
+    - Negative: Distance to railyards, elevation (high in relative sense), distance to truck routes
+    
+* Based on difference from 50% to 75% quantile ($|\text{diff}| > 0.005$), difference from above are highlighted
+  + UK-PLS:
+    - Positive: Elevation (low in relative sense), length of truck routes, length of A1 roads, length of A2-A2 intersections, imperviousness, length of A2/A3 roads, population, highly-developed land use
+    - Negative: *Evergreen forest land*, elevation (high in relative sense), elevation (above sea level), distance to rail yards
+  + SpatRF:
+    - Positive: *Length of truck routes*, elevation (low in relative sense), population, distance to coast
+    - Negative: *None*
+    
+* Based on difference from 25% to 75% quantile ($|\text{diff}| > 0.01$), difference from above are highlighted
+  + UK-PLS:
+    - Positive: Population, elevation (low in relative sense), length of truck routes, highly-developed land use, length of A1 roads, imperviousness
+    - Negative: elevation (high in relative sense), elevation (above sea level), evergreen forest land, distance to railroads, distance to rail yards
+  + SpatRF:
+    - Positive: Length of truck routes
+    - Negative: Distance to rail yards
+    
+Again, PLS typically highlights correlated strong predictors together, while SpatRF often identifies only one of them to be important.
+
+```{r, echo = FALSE}
+#* Predictors identified as **important for UK-PLS but not for SpatRF**: Imperviousness (+, no large difference), elevation (-, no large difference), evergreen forest land (-)
+#* Predictors identified as **highly important for SpatRF but only somewhat important for UK-PLS**: length of truck routes (+), distance to rail yards (-)
+```
+
+We see that even for the same model, variable importance could differ when we look at the change between different quantiles. The differences between PLS and SpatRF (if any) were mainly on the importance of evergreen forest land, high (relatively or absolutely) elevation and the length of truck routes.
+
+```{r, fig.width = 16, fig.height = 9, echo = FALSE}
+
+for (j in 1:length(rslt.bc.uw)){
+  idx = which(!is.na(rslt.bc.uw[[j]]$Y.pls))
+  Y.pls[idx] = rslt.bc.uw[[j]]$Y.pls[idx]
+  Y.spatrf.pl[idx] = rslt.bc.uw[[j]]$Y.spatrf.pl[idx]
+}
+
+pairs(cbind(dat$rlu_evergreen_p03000, dat$bc_uw, Y.pls, Y.spatrf.pl),
+      pch = 19, upper.panel = NULL, 
+      labels = c("Evergreen forest land", "BC", "PLS pred", "SpatRF pred"))
+
+pairs(cbind(dat$elev_5k_below, dat$bc_uw, Y.pls, Y.spatrf.pl),
+      pch = 19, upper.panel = NULL, 
+      labels = c("(Relative) elevation", "BC", "PLS pred", "SpatRF pred"))
+
+pairs(cbind(dat$elev_elevation, dat$bc_uw, Y.pls, Y.spatrf.pl),
+      pch = 19, upper.panel = NULL, 
+      labels = c("(Absolute) elevation", "BC", "PLS pred", "SpatRF pred"))
+
+pairs(cbind(dat$tl_s01000, dat$bc_uw, Y.pls, Y.spatrf.pl),
+      pch = 19, upper.panel = NULL, 
+      labels = c("Length of truck routes", "BC", "PLS pred", "SpatRF pred"))
+
+# colnames(X)[which.max(avg.spatrf[,6] - avg.spatrf[,4])]
+# colnames(X)[which.max(avg.spatrf[,6] - avg.spatrf[,2])]
+```
+
+In the scatter plots above, for covariates with more than one buffer size, we chose the buffer size that corresponds to the largest variable importance. Focusing on the relationship between each covariate and the predicted values, we did not observe a great difference, except that **the relationship between high elevation (both relative and absolute) and PLS predictions aligns (slightly) more closely to a line** than SpatRF -- which was expected, since elevation was identified to be more important to PLS predictions than to SpatRF. 
+
+```{r, echo = FALSE, fig.width = 20, fig.height=10}
+
+summary_plots(dat$rlu_evergreen_p03000, dat$bc_uw, Y.pls, Y.spatrf.pl, 
+             "Evergeen forest land")
+
+summary_plots(dat$elev_5k_below, dat$bc_uw, Y.pls, Y.spatrf.pl, 
+             "Relative elevation")
+
+summary_plots(dat$elev_elevation, dat$bc_uw, Y.pls, Y.spatrf.pl, 
+             "Absolute elevation")
+
+summary_plots(dat$tl_s01000, dat$bc_uw, Y.pls, Y.spatrf.pl, 
+             "Length of truck routes")
+```
+
+### Grid predictions and some covariates
+
+We observe low values near the right boundary in the grid prediction map from UK-PLS (see ```plots.html```). We would like to see how this relates to some covariates (e.g. **evergreen forest land** and **elevation**) that were found to be important for PLS but not for SpatRF. 
+
+```{r, echo = FALSE, fig.width=12, fig.height = 8}
+load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap/rslt_grid_uw.RData")
+
+project_crs <- 4326
+study_area_shp <- read_sf("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap/oval_shp/oval_around_monitoring_area.shp") %>% 
+  st_transform(project_crs)
+
+grid_covars_shp <- cov_grid %>%
+  st_as_sf(., coords=c("longitude","latitude"), remove = FALSE,
+           crs=project_crs)
+grid_covars_shp$in_study_area <- st_intersects(grid_covars_shp, study_area_shp,
+                                               sparse = FALSE) %>%
+  apply(., 1, any)
+cov_grid = cov_grid[grid_covars_shp$in_study_area,]
+
+p_rlu = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = cov_grid, aes(x = longitude, y = latitude, 
+                             color = rlu_evergreen_p03000)) +
+            scale_color_gradient(low = "white", high = "blue",
+                                 name = "") +
+            ggtitle("Evergreen forest land") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+
+p_elev = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = cov_grid, aes(x = longitude, y = latitude, 
+                             color = elev_5k_below)) +
+            scale_color_gradient(low = "white", high = "blue",
+                                 name = "") +
+            ggtitle("Relative elevation") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+
+p_elev_abs = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = cov_grid, aes(x = longitude, y = latitude, 
+                             color = elev_elevation)) +
+            scale_color_gradient(low = "white", high = "blue",
+                                 name = "") +
+            ggtitle("Absolute elevation") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+
+grid.arrange(arrangeGrob(p_rlu, p_elev, p_elev_abs, nrow=1))
+```
+
+```{r, include = FALSE, fig.width = 16, fig.height=9}
+## Appendix (for comparison)
+
+# What if we look at predictions at cohort locations instead of mobile monitoring locations? We compare the scatter plots between covariates and predictions again:
+
+# load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap/varimp_new/Xtest_cohort.RData")
+# 
+# X.test.ufp = as.data.frame(X.test.ufp)
+# X.test.bc = as.data.frame(X.test.bc)
+# 
+# pairs(cbind(X.test.ufp$log_m_to_l_airp, grid.ufp.uw$Y.pls, 
+#             grid.ufp.uw$Y.spatrf.pl),
+#       pch = 19, upper.panel = NULL, 
+#       labels = c("Dist to large airport", "PLS pred", "SpatRF pred"))
+# 
+# pairs(cbind(X.test.ufp$log_m_to_airp, grid.ufp.uw$Y.pls, 
+#             grid.ufp.uw$Y.spatrf.pl),
+#       pch = 19, upper.panel = NULL, 
+#       labels = c("Dist to airport", "PLS pred", "SpatRF pred"))
+# 
+# pairs(cbind(X.test.ufp$log_m_to_a1_a1_intersect, grid.ufp.uw$Y.pls, 
+#             grid.ufp.uw$Y.spatrf.pl),
+#       pch = 19, upper.panel = NULL, 
+#       labels = c("Dist to A1-A1 intersect", "PLS pred", "SpatRF pred"))
+# 
+# pairs(cbind(X.test.bc$rlu_evergreen_p03000, grid.bc.uw$Y.pls,
+#             grid.bc.uw$Y.spatrf.pl),
+#       pch = 19, upper.panel = NULL, 
+#       labels = c("Evergreen forest land", "PLS pred", "SpatRF pred"))
+# 
+# pairs(cbind(X.test.bc$elev_5k_below, grid.bc.uw$Y.pls, 
+#             grid.bc.uw$Y.spatrf.pl),
+#       pch = 19, upper.panel = NULL, 
+#       labels = c("(Relative) elevation", "PLS pred", "SpatRF pred"))
+# 
+# pairs(cbind(X.test.bc$elev_elevation, grid.bc.uw$Y.pls, 
+#             grid.bc.uw$Y.spatrf.pl),
+#       pch = 19, upper.panel = NULL, 
+#       labels = c("(Absolute) elevation", "PLS pred", "SpatRF pred"))
+# 
+# pairs(cbind(X.test.bc$tl_s01000, grid.bc.uw$Y.pls, 
+#             grid.bc.uw$Y.spatrf.pl),
+#       pch = 19, upper.panel = NULL, 
+#       labels = c("Length of truck routes", "PLS pred", "SpatRF pred"))
+```

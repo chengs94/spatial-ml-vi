@@ -1,0 +1,25 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1607404259881.000,
+    "dirty" : false,
+    "encoding" : "ISO8859-1",
+    "folds" : "",
+    "hash" : "290120053",
+    "id" : "95FF93A9",
+    "lastKnownWriteTime" : 1607503581,
+    "last_content_update" : 1608234702037,
+    "path" : "C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/trap/spatTreeModified.R",
+    "project_path" : "spatTreeModified.R",
+    "properties" : {
+        "cursorPosition" : "336,36",
+        "scrollLine" : "0"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 2,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

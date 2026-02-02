@@ -1,0 +1,25 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1605041888346.000,
+    "dirty" : false,
+    "encoding" : "ISO8859-1",
+    "folds" : "",
+    "hash" : "3765009455",
+    "id" : "1A750125",
+    "lastKnownWriteTime" : 1605053485,
+    "last_content_update" : 1605053485381,
+    "path" : "C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/spatialRF/spatTree.R",
+    "project_path" : "spatTree.R",
+    "properties" : {
+        "cursorPosition" : "40,3",
+        "scrollLine" : "0"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

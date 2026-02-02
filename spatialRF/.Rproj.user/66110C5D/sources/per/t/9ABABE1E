@@ -1,0 +1,26 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1604955012144.000,
+    "dirty" : false,
+    "encoding" : "ISO8859-1",
+    "folds" : "",
+    "hash" : "1718588920",
+    "id" : "9ABABE1E",
+    "lastKnownWriteTime" : 1606522136,
+    "last_content_update" : 1606522136889,
+    "path" : "C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/spatialRF/replicate.R",
+    "project_path" : "replicate.R",
+    "properties" : {
+        "cursorPosition" : "156,23",
+        "scrollLine" : "0",
+        "tempName" : "Untitled1"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 4,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

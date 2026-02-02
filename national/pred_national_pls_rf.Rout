@@ -1,0 +1,1375 @@
+
+R version 3.6.1 (2019-07-05) -- "Action of the Toes"
+Copyright (C) 2019 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+[Previously saved workspace restored]
+
+> library(SpatioTemporal)
+Loading required package: Matrix
+> library(matrixStats)
+> library(pls)
+
+Attaching package: ‘pls’
+
+The following object is masked from ‘package:stats’:
+
+    loadings
+
+> # library(inline)
+> library(parallel)
+> library(randomForest)
+randomForest 4.6-14
+Type rfNews() to see new features/changes/bug fixes.
+> 
+> setwd("/home/users/chengsi/Desktop/exposurepred/national")
+> 
+> source("aux_functions.R")
+> # source("spatTreeModified2.R")
+> 
+> job_no = 1
+> set.seed(job_no*5, kind="L'Ecuyer-CMRG")
+> 
+> pollutant <- c("EC","OC","S","Si")[job_no]
+> plltnt.mat <- read.csv(paste0("data/", pollutant,".txt"))
+> plltnt.mat <- plltnt.mat[-which(plltnt.mat$native_id=="PHOE5"),]
+> 
+> if(pollutant %in% c("S","Si")){
++   annavg <- plltnt.mat[,2]
++   X <- plltnt.mat[,c(14:25,27:613)]
++ } else{
++   sum1 <- ifelse(is.na(plltnt.mat[,2]),0,plltnt.mat[,2]*plltnt.mat[,3])
++   obs1 <-  ifelse(is.na(plltnt.mat[,3]),0,plltnt.mat[,3])
++   sum2 <- ifelse(is.na(plltnt.mat[,5]),0,plltnt.mat[,5]*plltnt.mat[,6])
++   obs2 <- ifelse(is.na(plltnt.mat[,6]),0,plltnt.mat[,6])
++   annavg <- (sum1+sum2)/(obs1+obs2)
++   X <- plltnt.mat[,c(18:29,31:617)]
++ }
+> 
+> # cleaned <- cleanGIS(as.matrix(X), NULL, rm.outliers = FALSE)
+> # X0 = X
+> # X = cleaned$X
+> 
+> annavg <- sqrt(annavg)
+> n <- length(annavg)
+> Y.pls <- Y.rf <- Y.rf.tprs <- rep(NA, n)
+> 
+> numfold <- 3
+> grid <- list(lambert_x = plltnt.mat$lambert_x,
++              lambert_y = plltnt.mat$lambert_y)
+> 
+> smpl <- sample(n)
+> ind.stop <- round(n/numfold*1:numfold)
+> ind.strt <- c(1,ind.stop[1:numfold-1]+1)
+> 
+> fold = 1
+> 
+> run = function(fold, col_idx, qt){
++   
++   cv.ind.i <- c(smpl[(ind.strt[fold]:ind.stop[fold])])
++   n.test <- length(cv.ind.i)
++   n.train <- n-n.test
++   Y.train <- annavg[-cv.ind.i]
++   Y.test <- annavg[cv.ind.i]
++   
++   ## Standardize Coordinates
++   train.coords <- cbind(grid$lambert_x[-cv.ind.i],grid$lambert_y[-cv.ind.i])
++   scale.params <- cbind(apply(train.coords,2,mean),apply(train.coords,2,sd))
++   x1train <- train.coords[,1] <- (train.coords[,1] - scale.params[1,1])/scale.params[1,2]
++   x2train <-train.coords[,2] <- (train.coords[,2] - scale.params[2,1])/scale.params[2,2]
++   test.coords <- cbind(grid$lambert_x[cv.ind.i],grid$lambert_y[cv.ind.i])
++   x1test <- test.coords[,1] <- (test.coords[,1] - scale.params[1,1])/scale.params[1,2]
++   x2test <- test.coords[,2] <- (test.coords[,2] - scale.params[2,1])/scale.params[2,2]
++   
++   cleaned <- cleanGIS(as.matrix(X[-cv.ind.i,]),
++                       as.matrix(X[cv.ind.i,]),
++                       rm.outliers = FALSE)
++   X.train <- cleaned$X
++   X.test <- cleaned$X.test
++   # X.train = X[-cv.ind.i,]
++   # X.test = X[cv.ind.i, ]
++   
++   if (col_idx <= ncol(X.test)){
++     X.test[,col_idx] = quantile(X.test[,col_idx], qt)
++   } else{
++     return(NULL)
++   }
++   
++   dmat <- as.matrix(SpatioTemporal::crossDist(train.coords))
++   dtestmat <- as.matrix(SpatioTemporal::crossDist(test.coords,train.coords))
++   
++   # UK - PLS
++   strt <- proc.time()
++   
++   X.train.pc <- X.train
++   X.test.pc <- X.test
++   
++   num.pcs <- 1:5
++   pc.pars <- matrix(NA,ncol=length(num.pcs),nrow=3)
++   for(i in num.pcs){
++     pc.obj <- get.pcs(X.train.pc,"pls",i,Y.train)
++     strt.vl <- optim(c(1,-1,1),logLikeExp,method="L-BFGS-B",
++                      lower=c(-30,-20,-10), upper =c(15,15,30),
++                      y=Y.train, dist.mat=dmat, x=pc.obj$X)
++     pc.pars[,which(num.pcs==i)] <- strt.vl$par
++   }
++   cv.pcs.pls <- cv.pcr.exp(X.train.pc, Y.train, dmat, cv.pcs = num.pcs, k = 5, 
++                            method="pls",pars.init = pc.pars)
++   pc.obj <- get.pcs(X.train.pc,"pls",cv.pcs.pls$opt.pcs,Y.train)
++   
++   new.x.train <- pc.obj$X
++   means<-apply(X.train.pc,2,mean)
++   mean.matrix<-matrix(rep(means,n.test),nrow=n.test,byrow=T)
++   sds <- apply(X.train.pc,2,sd)
++   new.x.test <- (X.test.pc - mean.matrix) %*% diag(1/sds) %*% pc.obj$proj
++   
++   theta.pls <- pc.pars[,which(num.pcs==cv.pcs.pls$opt.pcs)]
++   
++   sig.pls <- exp(theta.pls[1])
++   nug.pls <- exp(theta.pls[2])
++   range.pls <- exp(theta.pls[3])
++   
++   i.V <- .fastSolve(sig.pls * exp(-dmat/range.pls) + 
++                       nug.pls * diag(length(Y.train)))
++   beta.hat.pcr <- solve(t(new.x.train) %*% i.V %*% new.x.train,
++                         t(new.x.train) %*% i.V %*% Y.train)
++   Y.pls[cv.ind.i]<- c(new.x.test %*% beta.hat.pcr) + 
++     sig.pls * exp(-dtestmat/range.pls) %*% i.V %*% 
++     c(Y.train-c(new.x.train %*% beta.hat.pcr))
++   
++   pls.time <- proc.time()-strt
++   
++   strt <- proc.time()
++   rf <- randomForest(X.train,Y.train,xtest=X.test,nodesize=5,importance = TRUE)
++   mod <- mgcv::gam((Y.train-rf$predicted)~s(x1train,x2train,bs="tp",k=n.train,m=2,fx=FALSE))
++   Y.rf.tprs[cv.ind.i]<- rf$test$predicted+ predict(mod,data.frame(x1train=x1test,x2train=x2test))
++   Y.rf[cv.ind.i] <- rf$test$predicted
++   rf.time <- proc.time()-strt
++ 
++   message(paste("one round done, col_idx =", col_idx, "quantile = ", qt))
++   
++   return(list(# pls-uk
++     Y.pls = Y.pls, beta.hat.pls = beta.hat.pcr,
++     pc.obj = pc.obj, theta.pls = theta.pls, pls.time = pls.time,
++     # RF and RF-TPRS
++     Y.rf = Y.rf, Y.rf.tprs = Y.rf.tprs, rf.time = rf.time,
++     # others
++     col.idx = col_idx, qt = qt, X.train = X.train, X.test = X.test))
++ }
+> 
+> numCores = detectCores() - 1
+> 
+> pars = expand.grid(1:ncol(X), c(.25, .5, .75))
+> 
+> rslt = mcmapply(run, mc.cores = 1, #mc.cores = numCores,
++                 col_idx = pars[,1], qt = pars[,2],
++                 MoreArgs = list(fold = 1))
+one round done, col_idx = 1 quantile =  0.25
+one round done, col_idx = 2 quantile =  0.25
+one round done, col_idx = 3 quantile =  0.25
+one round done, col_idx = 4 quantile =  0.25
+one round done, col_idx = 5 quantile =  0.25
+one round done, col_idx = 6 quantile =  0.25
+one round done, col_idx = 7 quantile =  0.25
+one round done, col_idx = 8 quantile =  0.25
+one round done, col_idx = 9 quantile =  0.25
+one round done, col_idx = 10 quantile =  0.25
+one round done, col_idx = 11 quantile =  0.25
+one round done, col_idx = 12 quantile =  0.25
+one round done, col_idx = 13 quantile =  0.25
+one round done, col_idx = 14 quantile =  0.25
+one round done, col_idx = 15 quantile =  0.25
+one round done, col_idx = 16 quantile =  0.25
+one round done, col_idx = 17 quantile =  0.25
+one round done, col_idx = 18 quantile =  0.25
+one round done, col_idx = 19 quantile =  0.25
+one round done, col_idx = 20 quantile =  0.25
+one round done, col_idx = 21 quantile =  0.25
+one round done, col_idx = 22 quantile =  0.25
+one round done, col_idx = 23 quantile =  0.25
+one round done, col_idx = 24 quantile =  0.25
+one round done, col_idx = 25 quantile =  0.25
+one round done, col_idx = 26 quantile =  0.25
+one round done, col_idx = 27 quantile =  0.25
+one round done, col_idx = 28 quantile =  0.25
+one round done, col_idx = 29 quantile =  0.25
+one round done, col_idx = 30 quantile =  0.25
+one round done, col_idx = 31 quantile =  0.25
+one round done, col_idx = 32 quantile =  0.25
+one round done, col_idx = 33 quantile =  0.25
+one round done, col_idx = 34 quantile =  0.25
+one round done, col_idx = 35 quantile =  0.25
+one round done, col_idx = 36 quantile =  0.25
+one round done, col_idx = 37 quantile =  0.25
+one round done, col_idx = 38 quantile =  0.25
+one round done, col_idx = 39 quantile =  0.25
+one round done, col_idx = 40 quantile =  0.25
+one round done, col_idx = 41 quantile =  0.25
+one round done, col_idx = 42 quantile =  0.25
+one round done, col_idx = 43 quantile =  0.25
+one round done, col_idx = 44 quantile =  0.25
+one round done, col_idx = 45 quantile =  0.25
+one round done, col_idx = 46 quantile =  0.25
+one round done, col_idx = 47 quantile =  0.25
+one round done, col_idx = 48 quantile =  0.25
+one round done, col_idx = 49 quantile =  0.25
+one round done, col_idx = 50 quantile =  0.25
+one round done, col_idx = 51 quantile =  0.25
+one round done, col_idx = 52 quantile =  0.25
+one round done, col_idx = 53 quantile =  0.25
+one round done, col_idx = 54 quantile =  0.25
+one round done, col_idx = 55 quantile =  0.25
+one round done, col_idx = 56 quantile =  0.25
+one round done, col_idx = 57 quantile =  0.25
+one round done, col_idx = 58 quantile =  0.25
+one round done, col_idx = 59 quantile =  0.25
+one round done, col_idx = 60 quantile =  0.25
+one round done, col_idx = 61 quantile =  0.25
+one round done, col_idx = 62 quantile =  0.25
+one round done, col_idx = 63 quantile =  0.25
+one round done, col_idx = 64 quantile =  0.25
+one round done, col_idx = 65 quantile =  0.25
+one round done, col_idx = 66 quantile =  0.25
+one round done, col_idx = 67 quantile =  0.25
+one round done, col_idx = 68 quantile =  0.25
+one round done, col_idx = 69 quantile =  0.25
+one round done, col_idx = 70 quantile =  0.25
+one round done, col_idx = 71 quantile =  0.25
+one round done, col_idx = 72 quantile =  0.25
+one round done, col_idx = 73 quantile =  0.25
+one round done, col_idx = 74 quantile =  0.25
+one round done, col_idx = 75 quantile =  0.25
+one round done, col_idx = 76 quantile =  0.25
+one round done, col_idx = 77 quantile =  0.25
+one round done, col_idx = 78 quantile =  0.25
+one round done, col_idx = 79 quantile =  0.25
+one round done, col_idx = 80 quantile =  0.25
+one round done, col_idx = 81 quantile =  0.25
+one round done, col_idx = 82 quantile =  0.25
+one round done, col_idx = 83 quantile =  0.25
+one round done, col_idx = 84 quantile =  0.25
+one round done, col_idx = 85 quantile =  0.25
+one round done, col_idx = 86 quantile =  0.25
+one round done, col_idx = 87 quantile =  0.25
+one round done, col_idx = 88 quantile =  0.25
+one round done, col_idx = 89 quantile =  0.25
+one round done, col_idx = 90 quantile =  0.25
+one round done, col_idx = 91 quantile =  0.25
+one round done, col_idx = 92 quantile =  0.25
+one round done, col_idx = 93 quantile =  0.25
+one round done, col_idx = 94 quantile =  0.25
+one round done, col_idx = 95 quantile =  0.25
+one round done, col_idx = 96 quantile =  0.25
+one round done, col_idx = 97 quantile =  0.25
+one round done, col_idx = 98 quantile =  0.25
+one round done, col_idx = 99 quantile =  0.25
+one round done, col_idx = 100 quantile =  0.25
+one round done, col_idx = 101 quantile =  0.25
+one round done, col_idx = 102 quantile =  0.25
+one round done, col_idx = 103 quantile =  0.25
+one round done, col_idx = 104 quantile =  0.25
+one round done, col_idx = 105 quantile =  0.25
+one round done, col_idx = 106 quantile =  0.25
+one round done, col_idx = 107 quantile =  0.25
+one round done, col_idx = 108 quantile =  0.25
+one round done, col_idx = 109 quantile =  0.25
+one round done, col_idx = 110 quantile =  0.25
+one round done, col_idx = 111 quantile =  0.25
+one round done, col_idx = 112 quantile =  0.25
+one round done, col_idx = 113 quantile =  0.25
+one round done, col_idx = 114 quantile =  0.25
+one round done, col_idx = 115 quantile =  0.25
+one round done, col_idx = 116 quantile =  0.25
+one round done, col_idx = 117 quantile =  0.25
+one round done, col_idx = 118 quantile =  0.25
+one round done, col_idx = 119 quantile =  0.25
+one round done, col_idx = 120 quantile =  0.25
+one round done, col_idx = 121 quantile =  0.25
+one round done, col_idx = 122 quantile =  0.25
+one round done, col_idx = 123 quantile =  0.25
+one round done, col_idx = 124 quantile =  0.25
+one round done, col_idx = 125 quantile =  0.25
+one round done, col_idx = 126 quantile =  0.25
+one round done, col_idx = 127 quantile =  0.25
+one round done, col_idx = 128 quantile =  0.25
+one round done, col_idx = 129 quantile =  0.25
+one round done, col_idx = 130 quantile =  0.25
+one round done, col_idx = 131 quantile =  0.25
+one round done, col_idx = 132 quantile =  0.25
+one round done, col_idx = 133 quantile =  0.25
+one round done, col_idx = 134 quantile =  0.25
+one round done, col_idx = 135 quantile =  0.25
+one round done, col_idx = 136 quantile =  0.25
+one round done, col_idx = 137 quantile =  0.25
+one round done, col_idx = 138 quantile =  0.25
+one round done, col_idx = 139 quantile =  0.25
+one round done, col_idx = 140 quantile =  0.25
+one round done, col_idx = 141 quantile =  0.25
+one round done, col_idx = 142 quantile =  0.25
+one round done, col_idx = 143 quantile =  0.25
+one round done, col_idx = 144 quantile =  0.25
+one round done, col_idx = 145 quantile =  0.25
+one round done, col_idx = 146 quantile =  0.25
+one round done, col_idx = 147 quantile =  0.25
+one round done, col_idx = 148 quantile =  0.25
+one round done, col_idx = 149 quantile =  0.25
+one round done, col_idx = 150 quantile =  0.25
+one round done, col_idx = 151 quantile =  0.25
+one round done, col_idx = 152 quantile =  0.25
+one round done, col_idx = 153 quantile =  0.25
+one round done, col_idx = 154 quantile =  0.25
+one round done, col_idx = 155 quantile =  0.25
+one round done, col_idx = 156 quantile =  0.25
+one round done, col_idx = 157 quantile =  0.25
+one round done, col_idx = 158 quantile =  0.25
+one round done, col_idx = 159 quantile =  0.25
+one round done, col_idx = 160 quantile =  0.25
+one round done, col_idx = 161 quantile =  0.25
+one round done, col_idx = 162 quantile =  0.25
+one round done, col_idx = 163 quantile =  0.25
+one round done, col_idx = 164 quantile =  0.25
+one round done, col_idx = 165 quantile =  0.25
+one round done, col_idx = 166 quantile =  0.25
+one round done, col_idx = 167 quantile =  0.25
+one round done, col_idx = 168 quantile =  0.25
+one round done, col_idx = 169 quantile =  0.25
+one round done, col_idx = 170 quantile =  0.25
+one round done, col_idx = 171 quantile =  0.25
+one round done, col_idx = 172 quantile =  0.25
+one round done, col_idx = 173 quantile =  0.25
+one round done, col_idx = 174 quantile =  0.25
+one round done, col_idx = 175 quantile =  0.25
+one round done, col_idx = 176 quantile =  0.25
+one round done, col_idx = 177 quantile =  0.25
+one round done, col_idx = 178 quantile =  0.25
+one round done, col_idx = 179 quantile =  0.25
+one round done, col_idx = 180 quantile =  0.25
+one round done, col_idx = 181 quantile =  0.25
+one round done, col_idx = 182 quantile =  0.25
+one round done, col_idx = 183 quantile =  0.25
+one round done, col_idx = 184 quantile =  0.25
+one round done, col_idx = 185 quantile =  0.25
+one round done, col_idx = 186 quantile =  0.25
+one round done, col_idx = 187 quantile =  0.25
+one round done, col_idx = 188 quantile =  0.25
+one round done, col_idx = 189 quantile =  0.25
+one round done, col_idx = 190 quantile =  0.25
+one round done, col_idx = 191 quantile =  0.25
+one round done, col_idx = 192 quantile =  0.25
+one round done, col_idx = 193 quantile =  0.25
+one round done, col_idx = 194 quantile =  0.25
+one round done, col_idx = 195 quantile =  0.25
+one round done, col_idx = 196 quantile =  0.25
+one round done, col_idx = 197 quantile =  0.25
+one round done, col_idx = 198 quantile =  0.25
+one round done, col_idx = 199 quantile =  0.25
+one round done, col_idx = 200 quantile =  0.25
+one round done, col_idx = 201 quantile =  0.25
+one round done, col_idx = 202 quantile =  0.25
+one round done, col_idx = 203 quantile =  0.25
+one round done, col_idx = 204 quantile =  0.25
+one round done, col_idx = 205 quantile =  0.25
+one round done, col_idx = 206 quantile =  0.25
+one round done, col_idx = 207 quantile =  0.25
+one round done, col_idx = 208 quantile =  0.25
+one round done, col_idx = 209 quantile =  0.25
+one round done, col_idx = 210 quantile =  0.25
+one round done, col_idx = 211 quantile =  0.25
+one round done, col_idx = 212 quantile =  0.25
+one round done, col_idx = 213 quantile =  0.25
+one round done, col_idx = 214 quantile =  0.25
+one round done, col_idx = 215 quantile =  0.25
+one round done, col_idx = 216 quantile =  0.25
+one round done, col_idx = 217 quantile =  0.25
+one round done, col_idx = 218 quantile =  0.25
+one round done, col_idx = 219 quantile =  0.25
+one round done, col_idx = 220 quantile =  0.25
+one round done, col_idx = 221 quantile =  0.25
+one round done, col_idx = 222 quantile =  0.25
+one round done, col_idx = 223 quantile =  0.25
+one round done, col_idx = 224 quantile =  0.25
+one round done, col_idx = 225 quantile =  0.25
+one round done, col_idx = 226 quantile =  0.25
+one round done, col_idx = 227 quantile =  0.25
+one round done, col_idx = 228 quantile =  0.25
+one round done, col_idx = 229 quantile =  0.25
+one round done, col_idx = 230 quantile =  0.25
+one round done, col_idx = 231 quantile =  0.25
+one round done, col_idx = 232 quantile =  0.25
+one round done, col_idx = 233 quantile =  0.25
+one round done, col_idx = 234 quantile =  0.25
+one round done, col_idx = 235 quantile =  0.25
+one round done, col_idx = 236 quantile =  0.25
+one round done, col_idx = 237 quantile =  0.25
+one round done, col_idx = 238 quantile =  0.25
+one round done, col_idx = 239 quantile =  0.25
+one round done, col_idx = 240 quantile =  0.25
+one round done, col_idx = 241 quantile =  0.25
+one round done, col_idx = 242 quantile =  0.25
+one round done, col_idx = 243 quantile =  0.25
+one round done, col_idx = 244 quantile =  0.25
+one round done, col_idx = 245 quantile =  0.25
+one round done, col_idx = 246 quantile =  0.25
+one round done, col_idx = 247 quantile =  0.25
+one round done, col_idx = 248 quantile =  0.25
+one round done, col_idx = 249 quantile =  0.25
+one round done, col_idx = 250 quantile =  0.25
+one round done, col_idx = 251 quantile =  0.25
+one round done, col_idx = 252 quantile =  0.25
+one round done, col_idx = 253 quantile =  0.25
+one round done, col_idx = 254 quantile =  0.25
+one round done, col_idx = 255 quantile =  0.25
+one round done, col_idx = 256 quantile =  0.25
+one round done, col_idx = 257 quantile =  0.25
+one round done, col_idx = 258 quantile =  0.25
+one round done, col_idx = 259 quantile =  0.25
+one round done, col_idx = 260 quantile =  0.25
+one round done, col_idx = 261 quantile =  0.25
+one round done, col_idx = 262 quantile =  0.25
+one round done, col_idx = 263 quantile =  0.25
+one round done, col_idx = 264 quantile =  0.25
+one round done, col_idx = 265 quantile =  0.25
+one round done, col_idx = 266 quantile =  0.25
+one round done, col_idx = 267 quantile =  0.25
+one round done, col_idx = 268 quantile =  0.25
+one round done, col_idx = 269 quantile =  0.25
+one round done, col_idx = 270 quantile =  0.25
+one round done, col_idx = 271 quantile =  0.25
+one round done, col_idx = 272 quantile =  0.25
+one round done, col_idx = 273 quantile =  0.25
+one round done, col_idx = 274 quantile =  0.25
+one round done, col_idx = 275 quantile =  0.25
+one round done, col_idx = 276 quantile =  0.25
+one round done, col_idx = 277 quantile =  0.25
+one round done, col_idx = 278 quantile =  0.25
+one round done, col_idx = 279 quantile =  0.25
+one round done, col_idx = 280 quantile =  0.25
+one round done, col_idx = 281 quantile =  0.25
+one round done, col_idx = 282 quantile =  0.25
+one round done, col_idx = 283 quantile =  0.25
+one round done, col_idx = 284 quantile =  0.25
+one round done, col_idx = 285 quantile =  0.25
+one round done, col_idx = 286 quantile =  0.25
+one round done, col_idx = 287 quantile =  0.25
+one round done, col_idx = 288 quantile =  0.25
+one round done, col_idx = 289 quantile =  0.25
+one round done, col_idx = 290 quantile =  0.25
+one round done, col_idx = 291 quantile =  0.25
+one round done, col_idx = 292 quantile =  0.25
+one round done, col_idx = 293 quantile =  0.25
+one round done, col_idx = 294 quantile =  0.25
+one round done, col_idx = 295 quantile =  0.25
+one round done, col_idx = 296 quantile =  0.25
+one round done, col_idx = 297 quantile =  0.25
+one round done, col_idx = 298 quantile =  0.25
+one round done, col_idx = 299 quantile =  0.25
+one round done, col_idx = 300 quantile =  0.25
+one round done, col_idx = 301 quantile =  0.25
+one round done, col_idx = 302 quantile =  0.25
+one round done, col_idx = 303 quantile =  0.25
+one round done, col_idx = 304 quantile =  0.25
+one round done, col_idx = 305 quantile =  0.25
+one round done, col_idx = 306 quantile =  0.25
+one round done, col_idx = 307 quantile =  0.25
+one round done, col_idx = 308 quantile =  0.25
+one round done, col_idx = 309 quantile =  0.25
+one round done, col_idx = 310 quantile =  0.25
+one round done, col_idx = 311 quantile =  0.25
+one round done, col_idx = 312 quantile =  0.25
+one round done, col_idx = 313 quantile =  0.25
+one round done, col_idx = 314 quantile =  0.25
+one round done, col_idx = 315 quantile =  0.25
+one round done, col_idx = 316 quantile =  0.25
+one round done, col_idx = 317 quantile =  0.25
+one round done, col_idx = 318 quantile =  0.25
+one round done, col_idx = 319 quantile =  0.25
+one round done, col_idx = 320 quantile =  0.25
+one round done, col_idx = 321 quantile =  0.25
+one round done, col_idx = 322 quantile =  0.25
+one round done, col_idx = 323 quantile =  0.25
+one round done, col_idx = 324 quantile =  0.25
+one round done, col_idx = 325 quantile =  0.25
+one round done, col_idx = 326 quantile =  0.25
+one round done, col_idx = 327 quantile =  0.25
+one round done, col_idx = 328 quantile =  0.25
+one round done, col_idx = 329 quantile =  0.25
+one round done, col_idx = 330 quantile =  0.25
+one round done, col_idx = 331 quantile =  0.25
+one round done, col_idx = 332 quantile =  0.25
+one round done, col_idx = 333 quantile =  0.25
+one round done, col_idx = 334 quantile =  0.25
+one round done, col_idx = 335 quantile =  0.25
+one round done, col_idx = 336 quantile =  0.25
+one round done, col_idx = 337 quantile =  0.25
+one round done, col_idx = 338 quantile =  0.25
+one round done, col_idx = 339 quantile =  0.25
+one round done, col_idx = 340 quantile =  0.25
+one round done, col_idx = 341 quantile =  0.25
+one round done, col_idx = 342 quantile =  0.25
+one round done, col_idx = 343 quantile =  0.25
+one round done, col_idx = 344 quantile =  0.25
+one round done, col_idx = 345 quantile =  0.25
+one round done, col_idx = 346 quantile =  0.25
+one round done, col_idx = 347 quantile =  0.25
+one round done, col_idx = 348 quantile =  0.25
+one round done, col_idx = 349 quantile =  0.25
+one round done, col_idx = 350 quantile =  0.25
+one round done, col_idx = 351 quantile =  0.25
+one round done, col_idx = 352 quantile =  0.25
+one round done, col_idx = 353 quantile =  0.25
+one round done, col_idx = 354 quantile =  0.25
+one round done, col_idx = 355 quantile =  0.25
+one round done, col_idx = 356 quantile =  0.25
+one round done, col_idx = 357 quantile =  0.25
+one round done, col_idx = 358 quantile =  0.25
+one round done, col_idx = 359 quantile =  0.25
+one round done, col_idx = 360 quantile =  0.25
+one round done, col_idx = 361 quantile =  0.25
+one round done, col_idx = 362 quantile =  0.25
+one round done, col_idx = 363 quantile =  0.25
+one round done, col_idx = 364 quantile =  0.25
+one round done, col_idx = 365 quantile =  0.25
+one round done, col_idx = 366 quantile =  0.25
+one round done, col_idx = 367 quantile =  0.25
+one round done, col_idx = 368 quantile =  0.25
+one round done, col_idx = 369 quantile =  0.25
+one round done, col_idx = 370 quantile =  0.25
+one round done, col_idx = 371 quantile =  0.25
+one round done, col_idx = 372 quantile =  0.25
+one round done, col_idx = 373 quantile =  0.25
+one round done, col_idx = 374 quantile =  0.25
+one round done, col_idx = 375 quantile =  0.25
+one round done, col_idx = 376 quantile =  0.25
+one round done, col_idx = 377 quantile =  0.25
+one round done, col_idx = 378 quantile =  0.25
+one round done, col_idx = 379 quantile =  0.25
+one round done, col_idx = 380 quantile =  0.25
+one round done, col_idx = 381 quantile =  0.25
+one round done, col_idx = 382 quantile =  0.25
+one round done, col_idx = 383 quantile =  0.25
+one round done, col_idx = 384 quantile =  0.25
+one round done, col_idx = 385 quantile =  0.25
+one round done, col_idx = 386 quantile =  0.25
+one round done, col_idx = 387 quantile =  0.25
+one round done, col_idx = 388 quantile =  0.25
+one round done, col_idx = 389 quantile =  0.25
+one round done, col_idx = 390 quantile =  0.25
+one round done, col_idx = 391 quantile =  0.25
+one round done, col_idx = 392 quantile =  0.25
+one round done, col_idx = 393 quantile =  0.25
+one round done, col_idx = 394 quantile =  0.25
+one round done, col_idx = 395 quantile =  0.25
+one round done, col_idx = 396 quantile =  0.25
+one round done, col_idx = 397 quantile =  0.25
+one round done, col_idx = 398 quantile =  0.25
+one round done, col_idx = 399 quantile =  0.25
+one round done, col_idx = 400 quantile =  0.25
+one round done, col_idx = 401 quantile =  0.25
+one round done, col_idx = 402 quantile =  0.25
+one round done, col_idx = 403 quantile =  0.25
+one round done, col_idx = 404 quantile =  0.25
+one round done, col_idx = 405 quantile =  0.25
+one round done, col_idx = 406 quantile =  0.25
+one round done, col_idx = 407 quantile =  0.25
+one round done, col_idx = 408 quantile =  0.25
+one round done, col_idx = 409 quantile =  0.25
+one round done, col_idx = 410 quantile =  0.25
+one round done, col_idx = 411 quantile =  0.25
+one round done, col_idx = 412 quantile =  0.25
+one round done, col_idx = 413 quantile =  0.25
+one round done, col_idx = 414 quantile =  0.25
+one round done, col_idx = 415 quantile =  0.25
+one round done, col_idx = 416 quantile =  0.25
+one round done, col_idx = 417 quantile =  0.25
+one round done, col_idx = 418 quantile =  0.25
+one round done, col_idx = 419 quantile =  0.25
+one round done, col_idx = 420 quantile =  0.25
+one round done, col_idx = 421 quantile =  0.25
+one round done, col_idx = 422 quantile =  0.25
+one round done, col_idx = 423 quantile =  0.25
+one round done, col_idx = 424 quantile =  0.25
+one round done, col_idx = 425 quantile =  0.25
+one round done, col_idx = 426 quantile =  0.25
+one round done, col_idx = 427 quantile =  0.25
+one round done, col_idx = 428 quantile =  0.25
+one round done, col_idx = 429 quantile =  0.25
+one round done, col_idx = 430 quantile =  0.25
+one round done, col_idx = 431 quantile =  0.25
+one round done, col_idx = 432 quantile =  0.25
+one round done, col_idx = 433 quantile =  0.25
+one round done, col_idx = 434 quantile =  0.25
+one round done, col_idx = 435 quantile =  0.25
+one round done, col_idx = 436 quantile =  0.25
+one round done, col_idx = 437 quantile =  0.25
+one round done, col_idx = 438 quantile =  0.25
+one round done, col_idx = 439 quantile =  0.25
+one round done, col_idx = 440 quantile =  0.25
+one round done, col_idx = 441 quantile =  0.25
+one round done, col_idx = 442 quantile =  0.25
+one round done, col_idx = 443 quantile =  0.25
+one round done, col_idx = 444 quantile =  0.25
+one round done, col_idx = 445 quantile =  0.25
+one round done, col_idx = 446 quantile =  0.25
+one round done, col_idx = 447 quantile =  0.25
+one round done, col_idx = 448 quantile =  0.25
+one round done, col_idx = 449 quantile =  0.25
+one round done, col_idx = 450 quantile =  0.25
+one round done, col_idx = 451 quantile =  0.25
+one round done, col_idx = 452 quantile =  0.25
+one round done, col_idx = 453 quantile =  0.25
+one round done, col_idx = 454 quantile =  0.25
+one round done, col_idx = 455 quantile =  0.25
+one round done, col_idx = 456 quantile =  0.25
+one round done, col_idx = 457 quantile =  0.25
+one round done, col_idx = 458 quantile =  0.25
+one round done, col_idx = 459 quantile =  0.25
+one round done, col_idx = 460 quantile =  0.25
+one round done, col_idx = 461 quantile =  0.25
+one round done, col_idx = 462 quantile =  0.25
+one round done, col_idx = 463 quantile =  0.25
+one round done, col_idx = 464 quantile =  0.25
+one round done, col_idx = 465 quantile =  0.25
+one round done, col_idx = 466 quantile =  0.25
+one round done, col_idx = 1 quantile =  0.5
+one round done, col_idx = 2 quantile =  0.5
+one round done, col_idx = 3 quantile =  0.5
+one round done, col_idx = 4 quantile =  0.5
+one round done, col_idx = 5 quantile =  0.5
+one round done, col_idx = 6 quantile =  0.5
+one round done, col_idx = 7 quantile =  0.5
+one round done, col_idx = 8 quantile =  0.5
+one round done, col_idx = 9 quantile =  0.5
+one round done, col_idx = 10 quantile =  0.5
+one round done, col_idx = 11 quantile =  0.5
+one round done, col_idx = 12 quantile =  0.5
+one round done, col_idx = 13 quantile =  0.5
+one round done, col_idx = 14 quantile =  0.5
+one round done, col_idx = 15 quantile =  0.5
+one round done, col_idx = 16 quantile =  0.5
+one round done, col_idx = 17 quantile =  0.5
+one round done, col_idx = 18 quantile =  0.5
+one round done, col_idx = 19 quantile =  0.5
+one round done, col_idx = 20 quantile =  0.5
+one round done, col_idx = 21 quantile =  0.5
+one round done, col_idx = 22 quantile =  0.5
+one round done, col_idx = 23 quantile =  0.5
+one round done, col_idx = 24 quantile =  0.5
+one round done, col_idx = 25 quantile =  0.5
+one round done, col_idx = 26 quantile =  0.5
+one round done, col_idx = 27 quantile =  0.5
+one round done, col_idx = 28 quantile =  0.5
+one round done, col_idx = 29 quantile =  0.5
+one round done, col_idx = 30 quantile =  0.5
+one round done, col_idx = 31 quantile =  0.5
+one round done, col_idx = 32 quantile =  0.5
+one round done, col_idx = 33 quantile =  0.5
+one round done, col_idx = 34 quantile =  0.5
+one round done, col_idx = 35 quantile =  0.5
+one round done, col_idx = 36 quantile =  0.5
+one round done, col_idx = 37 quantile =  0.5
+one round done, col_idx = 38 quantile =  0.5
+one round done, col_idx = 39 quantile =  0.5
+one round done, col_idx = 40 quantile =  0.5
+one round done, col_idx = 41 quantile =  0.5
+one round done, col_idx = 42 quantile =  0.5
+one round done, col_idx = 43 quantile =  0.5
+one round done, col_idx = 44 quantile =  0.5
+one round done, col_idx = 45 quantile =  0.5
+one round done, col_idx = 46 quantile =  0.5
+one round done, col_idx = 47 quantile =  0.5
+one round done, col_idx = 48 quantile =  0.5
+one round done, col_idx = 49 quantile =  0.5
+one round done, col_idx = 50 quantile =  0.5
+one round done, col_idx = 51 quantile =  0.5
+one round done, col_idx = 52 quantile =  0.5
+one round done, col_idx = 53 quantile =  0.5
+one round done, col_idx = 54 quantile =  0.5
+one round done, col_idx = 55 quantile =  0.5
+one round done, col_idx = 56 quantile =  0.5
+one round done, col_idx = 57 quantile =  0.5
+one round done, col_idx = 58 quantile =  0.5
+one round done, col_idx = 59 quantile =  0.5
+one round done, col_idx = 60 quantile =  0.5
+one round done, col_idx = 61 quantile =  0.5
+one round done, col_idx = 62 quantile =  0.5
+one round done, col_idx = 63 quantile =  0.5
+one round done, col_idx = 64 quantile =  0.5
+one round done, col_idx = 65 quantile =  0.5
+one round done, col_idx = 66 quantile =  0.5
+one round done, col_idx = 67 quantile =  0.5
+one round done, col_idx = 68 quantile =  0.5
+one round done, col_idx = 69 quantile =  0.5
+one round done, col_idx = 70 quantile =  0.5
+one round done, col_idx = 71 quantile =  0.5
+one round done, col_idx = 72 quantile =  0.5
+one round done, col_idx = 73 quantile =  0.5
+one round done, col_idx = 74 quantile =  0.5
+one round done, col_idx = 75 quantile =  0.5
+one round done, col_idx = 76 quantile =  0.5
+one round done, col_idx = 77 quantile =  0.5
+one round done, col_idx = 78 quantile =  0.5
+one round done, col_idx = 79 quantile =  0.5
+one round done, col_idx = 80 quantile =  0.5
+one round done, col_idx = 81 quantile =  0.5
+one round done, col_idx = 82 quantile =  0.5
+one round done, col_idx = 83 quantile =  0.5
+one round done, col_idx = 84 quantile =  0.5
+one round done, col_idx = 85 quantile =  0.5
+one round done, col_idx = 86 quantile =  0.5
+one round done, col_idx = 87 quantile =  0.5
+one round done, col_idx = 88 quantile =  0.5
+one round done, col_idx = 89 quantile =  0.5
+one round done, col_idx = 90 quantile =  0.5
+one round done, col_idx = 91 quantile =  0.5
+one round done, col_idx = 92 quantile =  0.5
+one round done, col_idx = 93 quantile =  0.5
+one round done, col_idx = 94 quantile =  0.5
+one round done, col_idx = 95 quantile =  0.5
+one round done, col_idx = 96 quantile =  0.5
+one round done, col_idx = 97 quantile =  0.5
+one round done, col_idx = 98 quantile =  0.5
+one round done, col_idx = 99 quantile =  0.5
+one round done, col_idx = 100 quantile =  0.5
+one round done, col_idx = 101 quantile =  0.5
+one round done, col_idx = 102 quantile =  0.5
+one round done, col_idx = 103 quantile =  0.5
+one round done, col_idx = 104 quantile =  0.5
+one round done, col_idx = 105 quantile =  0.5
+one round done, col_idx = 106 quantile =  0.5
+one round done, col_idx = 107 quantile =  0.5
+one round done, col_idx = 108 quantile =  0.5
+one round done, col_idx = 109 quantile =  0.5
+one round done, col_idx = 110 quantile =  0.5
+one round done, col_idx = 111 quantile =  0.5
+one round done, col_idx = 112 quantile =  0.5
+one round done, col_idx = 113 quantile =  0.5
+one round done, col_idx = 114 quantile =  0.5
+one round done, col_idx = 115 quantile =  0.5
+one round done, col_idx = 116 quantile =  0.5
+one round done, col_idx = 117 quantile =  0.5
+one round done, col_idx = 118 quantile =  0.5
+one round done, col_idx = 119 quantile =  0.5
+one round done, col_idx = 120 quantile =  0.5
+one round done, col_idx = 121 quantile =  0.5
+one round done, col_idx = 122 quantile =  0.5
+one round done, col_idx = 123 quantile =  0.5
+one round done, col_idx = 124 quantile =  0.5
+one round done, col_idx = 125 quantile =  0.5
+one round done, col_idx = 126 quantile =  0.5
+one round done, col_idx = 127 quantile =  0.5
+one round done, col_idx = 128 quantile =  0.5
+one round done, col_idx = 129 quantile =  0.5
+one round done, col_idx = 130 quantile =  0.5
+one round done, col_idx = 131 quantile =  0.5
+one round done, col_idx = 132 quantile =  0.5
+one round done, col_idx = 133 quantile =  0.5
+one round done, col_idx = 134 quantile =  0.5
+one round done, col_idx = 135 quantile =  0.5
+one round done, col_idx = 136 quantile =  0.5
+one round done, col_idx = 137 quantile =  0.5
+one round done, col_idx = 138 quantile =  0.5
+one round done, col_idx = 139 quantile =  0.5
+one round done, col_idx = 140 quantile =  0.5
+one round done, col_idx = 141 quantile =  0.5
+one round done, col_idx = 142 quantile =  0.5
+one round done, col_idx = 143 quantile =  0.5
+one round done, col_idx = 144 quantile =  0.5
+one round done, col_idx = 145 quantile =  0.5
+one round done, col_idx = 146 quantile =  0.5
+one round done, col_idx = 147 quantile =  0.5
+one round done, col_idx = 148 quantile =  0.5
+one round done, col_idx = 149 quantile =  0.5
+one round done, col_idx = 150 quantile =  0.5
+one round done, col_idx = 151 quantile =  0.5
+one round done, col_idx = 152 quantile =  0.5
+one round done, col_idx = 153 quantile =  0.5
+one round done, col_idx = 154 quantile =  0.5
+one round done, col_idx = 155 quantile =  0.5
+one round done, col_idx = 156 quantile =  0.5
+one round done, col_idx = 157 quantile =  0.5
+one round done, col_idx = 158 quantile =  0.5
+one round done, col_idx = 159 quantile =  0.5
+one round done, col_idx = 160 quantile =  0.5
+one round done, col_idx = 161 quantile =  0.5
+one round done, col_idx = 162 quantile =  0.5
+one round done, col_idx = 163 quantile =  0.5
+one round done, col_idx = 164 quantile =  0.5
+one round done, col_idx = 165 quantile =  0.5
+one round done, col_idx = 166 quantile =  0.5
+one round done, col_idx = 167 quantile =  0.5
+one round done, col_idx = 168 quantile =  0.5
+one round done, col_idx = 169 quantile =  0.5
+one round done, col_idx = 170 quantile =  0.5
+one round done, col_idx = 171 quantile =  0.5
+one round done, col_idx = 172 quantile =  0.5
+one round done, col_idx = 173 quantile =  0.5
+one round done, col_idx = 174 quantile =  0.5
+one round done, col_idx = 175 quantile =  0.5
+one round done, col_idx = 176 quantile =  0.5
+one round done, col_idx = 177 quantile =  0.5
+one round done, col_idx = 178 quantile =  0.5
+one round done, col_idx = 179 quantile =  0.5
+one round done, col_idx = 180 quantile =  0.5
+one round done, col_idx = 181 quantile =  0.5
+one round done, col_idx = 182 quantile =  0.5
+one round done, col_idx = 183 quantile =  0.5
+one round done, col_idx = 184 quantile =  0.5
+one round done, col_idx = 185 quantile =  0.5
+one round done, col_idx = 186 quantile =  0.5
+one round done, col_idx = 187 quantile =  0.5
+one round done, col_idx = 188 quantile =  0.5
+one round done, col_idx = 189 quantile =  0.5
+one round done, col_idx = 190 quantile =  0.5
+one round done, col_idx = 191 quantile =  0.5
+one round done, col_idx = 192 quantile =  0.5
+one round done, col_idx = 193 quantile =  0.5
+one round done, col_idx = 194 quantile =  0.5
+one round done, col_idx = 195 quantile =  0.5
+one round done, col_idx = 196 quantile =  0.5
+one round done, col_idx = 197 quantile =  0.5
+one round done, col_idx = 198 quantile =  0.5
+one round done, col_idx = 199 quantile =  0.5
+one round done, col_idx = 200 quantile =  0.5
+one round done, col_idx = 201 quantile =  0.5
+one round done, col_idx = 202 quantile =  0.5
+one round done, col_idx = 203 quantile =  0.5
+one round done, col_idx = 204 quantile =  0.5
+one round done, col_idx = 205 quantile =  0.5
+one round done, col_idx = 206 quantile =  0.5
+one round done, col_idx = 207 quantile =  0.5
+one round done, col_idx = 208 quantile =  0.5
+one round done, col_idx = 209 quantile =  0.5
+one round done, col_idx = 210 quantile =  0.5
+one round done, col_idx = 211 quantile =  0.5
+one round done, col_idx = 212 quantile =  0.5
+one round done, col_idx = 213 quantile =  0.5
+one round done, col_idx = 214 quantile =  0.5
+one round done, col_idx = 215 quantile =  0.5
+one round done, col_idx = 216 quantile =  0.5
+one round done, col_idx = 217 quantile =  0.5
+one round done, col_idx = 218 quantile =  0.5
+one round done, col_idx = 219 quantile =  0.5
+one round done, col_idx = 220 quantile =  0.5
+one round done, col_idx = 221 quantile =  0.5
+one round done, col_idx = 222 quantile =  0.5
+one round done, col_idx = 223 quantile =  0.5
+one round done, col_idx = 224 quantile =  0.5
+one round done, col_idx = 225 quantile =  0.5
+one round done, col_idx = 226 quantile =  0.5
+one round done, col_idx = 227 quantile =  0.5
+one round done, col_idx = 228 quantile =  0.5
+one round done, col_idx = 229 quantile =  0.5
+one round done, col_idx = 230 quantile =  0.5
+one round done, col_idx = 231 quantile =  0.5
+one round done, col_idx = 232 quantile =  0.5
+one round done, col_idx = 233 quantile =  0.5
+one round done, col_idx = 234 quantile =  0.5
+one round done, col_idx = 235 quantile =  0.5
+one round done, col_idx = 236 quantile =  0.5
+one round done, col_idx = 237 quantile =  0.5
+one round done, col_idx = 238 quantile =  0.5
+one round done, col_idx = 239 quantile =  0.5
+one round done, col_idx = 240 quantile =  0.5
+one round done, col_idx = 241 quantile =  0.5
+one round done, col_idx = 242 quantile =  0.5
+one round done, col_idx = 243 quantile =  0.5
+one round done, col_idx = 244 quantile =  0.5
+one round done, col_idx = 245 quantile =  0.5
+one round done, col_idx = 246 quantile =  0.5
+one round done, col_idx = 247 quantile =  0.5
+one round done, col_idx = 248 quantile =  0.5
+one round done, col_idx = 249 quantile =  0.5
+one round done, col_idx = 250 quantile =  0.5
+one round done, col_idx = 251 quantile =  0.5
+one round done, col_idx = 252 quantile =  0.5
+one round done, col_idx = 253 quantile =  0.5
+one round done, col_idx = 254 quantile =  0.5
+one round done, col_idx = 255 quantile =  0.5
+one round done, col_idx = 256 quantile =  0.5
+one round done, col_idx = 257 quantile =  0.5
+one round done, col_idx = 258 quantile =  0.5
+one round done, col_idx = 259 quantile =  0.5
+one round done, col_idx = 260 quantile =  0.5
+one round done, col_idx = 261 quantile =  0.5
+one round done, col_idx = 262 quantile =  0.5
+one round done, col_idx = 263 quantile =  0.5
+one round done, col_idx = 264 quantile =  0.5
+one round done, col_idx = 265 quantile =  0.5
+one round done, col_idx = 266 quantile =  0.5
+one round done, col_idx = 267 quantile =  0.5
+one round done, col_idx = 268 quantile =  0.5
+one round done, col_idx = 269 quantile =  0.5
+one round done, col_idx = 270 quantile =  0.5
+one round done, col_idx = 271 quantile =  0.5
+one round done, col_idx = 272 quantile =  0.5
+one round done, col_idx = 273 quantile =  0.5
+one round done, col_idx = 274 quantile =  0.5
+one round done, col_idx = 275 quantile =  0.5
+one round done, col_idx = 276 quantile =  0.5
+one round done, col_idx = 277 quantile =  0.5
+one round done, col_idx = 278 quantile =  0.5
+one round done, col_idx = 279 quantile =  0.5
+one round done, col_idx = 280 quantile =  0.5
+one round done, col_idx = 281 quantile =  0.5
+one round done, col_idx = 282 quantile =  0.5
+one round done, col_idx = 283 quantile =  0.5
+one round done, col_idx = 284 quantile =  0.5
+one round done, col_idx = 285 quantile =  0.5
+one round done, col_idx = 286 quantile =  0.5
+one round done, col_idx = 287 quantile =  0.5
+one round done, col_idx = 288 quantile =  0.5
+one round done, col_idx = 289 quantile =  0.5
+one round done, col_idx = 290 quantile =  0.5
+one round done, col_idx = 291 quantile =  0.5
+one round done, col_idx = 292 quantile =  0.5
+one round done, col_idx = 293 quantile =  0.5
+one round done, col_idx = 294 quantile =  0.5
+one round done, col_idx = 295 quantile =  0.5
+one round done, col_idx = 296 quantile =  0.5
+one round done, col_idx = 297 quantile =  0.5
+one round done, col_idx = 298 quantile =  0.5
+one round done, col_idx = 299 quantile =  0.5
+one round done, col_idx = 300 quantile =  0.5
+one round done, col_idx = 301 quantile =  0.5
+one round done, col_idx = 302 quantile =  0.5
+one round done, col_idx = 303 quantile =  0.5
+one round done, col_idx = 304 quantile =  0.5
+one round done, col_idx = 305 quantile =  0.5
+one round done, col_idx = 306 quantile =  0.5
+one round done, col_idx = 307 quantile =  0.5
+one round done, col_idx = 308 quantile =  0.5
+one round done, col_idx = 309 quantile =  0.5
+one round done, col_idx = 310 quantile =  0.5
+one round done, col_idx = 311 quantile =  0.5
+one round done, col_idx = 312 quantile =  0.5
+one round done, col_idx = 313 quantile =  0.5
+one round done, col_idx = 314 quantile =  0.5
+one round done, col_idx = 315 quantile =  0.5
+one round done, col_idx = 316 quantile =  0.5
+one round done, col_idx = 317 quantile =  0.5
+one round done, col_idx = 318 quantile =  0.5
+one round done, col_idx = 319 quantile =  0.5
+one round done, col_idx = 320 quantile =  0.5
+one round done, col_idx = 321 quantile =  0.5
+one round done, col_idx = 322 quantile =  0.5
+one round done, col_idx = 323 quantile =  0.5
+one round done, col_idx = 324 quantile =  0.5
+one round done, col_idx = 325 quantile =  0.5
+one round done, col_idx = 326 quantile =  0.5
+one round done, col_idx = 327 quantile =  0.5
+one round done, col_idx = 328 quantile =  0.5
+one round done, col_idx = 329 quantile =  0.5
+one round done, col_idx = 330 quantile =  0.5
+one round done, col_idx = 331 quantile =  0.5
+one round done, col_idx = 332 quantile =  0.5
+one round done, col_idx = 333 quantile =  0.5
+one round done, col_idx = 334 quantile =  0.5
+one round done, col_idx = 335 quantile =  0.5
+one round done, col_idx = 336 quantile =  0.5
+one round done, col_idx = 337 quantile =  0.5
+one round done, col_idx = 338 quantile =  0.5
+one round done, col_idx = 339 quantile =  0.5
+one round done, col_idx = 340 quantile =  0.5
+one round done, col_idx = 341 quantile =  0.5
+one round done, col_idx = 342 quantile =  0.5
+one round done, col_idx = 343 quantile =  0.5
+one round done, col_idx = 344 quantile =  0.5
+one round done, col_idx = 345 quantile =  0.5
+one round done, col_idx = 346 quantile =  0.5
+one round done, col_idx = 347 quantile =  0.5
+one round done, col_idx = 348 quantile =  0.5
+one round done, col_idx = 349 quantile =  0.5
+one round done, col_idx = 350 quantile =  0.5
+one round done, col_idx = 351 quantile =  0.5
+one round done, col_idx = 352 quantile =  0.5
+one round done, col_idx = 353 quantile =  0.5
+one round done, col_idx = 354 quantile =  0.5
+one round done, col_idx = 355 quantile =  0.5
+one round done, col_idx = 356 quantile =  0.5
+one round done, col_idx = 357 quantile =  0.5
+one round done, col_idx = 358 quantile =  0.5
+one round done, col_idx = 359 quantile =  0.5
+one round done, col_idx = 360 quantile =  0.5
+one round done, col_idx = 361 quantile =  0.5
+one round done, col_idx = 362 quantile =  0.5
+one round done, col_idx = 363 quantile =  0.5
+one round done, col_idx = 364 quantile =  0.5
+one round done, col_idx = 365 quantile =  0.5
+one round done, col_idx = 366 quantile =  0.5
+one round done, col_idx = 367 quantile =  0.5
+one round done, col_idx = 368 quantile =  0.5
+one round done, col_idx = 369 quantile =  0.5
+one round done, col_idx = 370 quantile =  0.5
+one round done, col_idx = 371 quantile =  0.5
+one round done, col_idx = 372 quantile =  0.5
+one round done, col_idx = 373 quantile =  0.5
+one round done, col_idx = 374 quantile =  0.5
+one round done, col_idx = 375 quantile =  0.5
+one round done, col_idx = 376 quantile =  0.5
+one round done, col_idx = 377 quantile =  0.5
+one round done, col_idx = 378 quantile =  0.5
+one round done, col_idx = 379 quantile =  0.5
+one round done, col_idx = 380 quantile =  0.5
+one round done, col_idx = 381 quantile =  0.5
+one round done, col_idx = 382 quantile =  0.5
+one round done, col_idx = 383 quantile =  0.5
+one round done, col_idx = 384 quantile =  0.5
+one round done, col_idx = 385 quantile =  0.5
+one round done, col_idx = 386 quantile =  0.5
+one round done, col_idx = 387 quantile =  0.5
+one round done, col_idx = 388 quantile =  0.5
+one round done, col_idx = 389 quantile =  0.5
+one round done, col_idx = 390 quantile =  0.5
+one round done, col_idx = 391 quantile =  0.5
+one round done, col_idx = 392 quantile =  0.5
+one round done, col_idx = 393 quantile =  0.5
+one round done, col_idx = 394 quantile =  0.5
+one round done, col_idx = 395 quantile =  0.5
+one round done, col_idx = 396 quantile =  0.5
+one round done, col_idx = 397 quantile =  0.5
+one round done, col_idx = 398 quantile =  0.5
+one round done, col_idx = 399 quantile =  0.5
+one round done, col_idx = 400 quantile =  0.5
+one round done, col_idx = 401 quantile =  0.5
+one round done, col_idx = 402 quantile =  0.5
+one round done, col_idx = 403 quantile =  0.5
+one round done, col_idx = 404 quantile =  0.5
+one round done, col_idx = 405 quantile =  0.5
+one round done, col_idx = 406 quantile =  0.5
+one round done, col_idx = 407 quantile =  0.5
+one round done, col_idx = 408 quantile =  0.5
+one round done, col_idx = 409 quantile =  0.5
+one round done, col_idx = 410 quantile =  0.5
+one round done, col_idx = 411 quantile =  0.5
+one round done, col_idx = 412 quantile =  0.5
+one round done, col_idx = 413 quantile =  0.5
+one round done, col_idx = 414 quantile =  0.5
+one round done, col_idx = 415 quantile =  0.5
+one round done, col_idx = 416 quantile =  0.5
+one round done, col_idx = 417 quantile =  0.5
+one round done, col_idx = 418 quantile =  0.5
+one round done, col_idx = 419 quantile =  0.5
+one round done, col_idx = 420 quantile =  0.5
+one round done, col_idx = 421 quantile =  0.5
+one round done, col_idx = 422 quantile =  0.5
+one round done, col_idx = 423 quantile =  0.5
+one round done, col_idx = 424 quantile =  0.5
+one round done, col_idx = 425 quantile =  0.5
+one round done, col_idx = 426 quantile =  0.5
+one round done, col_idx = 427 quantile =  0.5
+one round done, col_idx = 428 quantile =  0.5
+one round done, col_idx = 429 quantile =  0.5
+one round done, col_idx = 430 quantile =  0.5
+one round done, col_idx = 431 quantile =  0.5
+one round done, col_idx = 432 quantile =  0.5
+one round done, col_idx = 433 quantile =  0.5
+one round done, col_idx = 434 quantile =  0.5
+one round done, col_idx = 435 quantile =  0.5
+one round done, col_idx = 436 quantile =  0.5
+one round done, col_idx = 437 quantile =  0.5
+one round done, col_idx = 438 quantile =  0.5
+one round done, col_idx = 439 quantile =  0.5
+one round done, col_idx = 440 quantile =  0.5
+one round done, col_idx = 441 quantile =  0.5
+one round done, col_idx = 442 quantile =  0.5
+one round done, col_idx = 443 quantile =  0.5
+one round done, col_idx = 444 quantile =  0.5
+one round done, col_idx = 445 quantile =  0.5
+one round done, col_idx = 446 quantile =  0.5
+one round done, col_idx = 447 quantile =  0.5
+one round done, col_idx = 448 quantile =  0.5
+one round done, col_idx = 449 quantile =  0.5
+one round done, col_idx = 450 quantile =  0.5
+one round done, col_idx = 451 quantile =  0.5
+one round done, col_idx = 452 quantile =  0.5
+one round done, col_idx = 453 quantile =  0.5
+one round done, col_idx = 454 quantile =  0.5
+one round done, col_idx = 455 quantile =  0.5
+one round done, col_idx = 456 quantile =  0.5
+one round done, col_idx = 457 quantile =  0.5
+one round done, col_idx = 458 quantile =  0.5
+one round done, col_idx = 459 quantile =  0.5
+one round done, col_idx = 460 quantile =  0.5
+one round done, col_idx = 461 quantile =  0.5
+one round done, col_idx = 462 quantile =  0.5
+one round done, col_idx = 463 quantile =  0.5
+one round done, col_idx = 464 quantile =  0.5
+one round done, col_idx = 465 quantile =  0.5
+one round done, col_idx = 466 quantile =  0.5
+one round done, col_idx = 1 quantile =  0.75
+one round done, col_idx = 2 quantile =  0.75
+one round done, col_idx = 3 quantile =  0.75
+one round done, col_idx = 4 quantile =  0.75
+one round done, col_idx = 5 quantile =  0.75
+one round done, col_idx = 6 quantile =  0.75
+one round done, col_idx = 7 quantile =  0.75
+one round done, col_idx = 8 quantile =  0.75
+one round done, col_idx = 9 quantile =  0.75
+one round done, col_idx = 10 quantile =  0.75
+one round done, col_idx = 11 quantile =  0.75
+one round done, col_idx = 12 quantile =  0.75
+one round done, col_idx = 13 quantile =  0.75
+one round done, col_idx = 14 quantile =  0.75
+one round done, col_idx = 15 quantile =  0.75
+one round done, col_idx = 16 quantile =  0.75
+one round done, col_idx = 17 quantile =  0.75
+one round done, col_idx = 18 quantile =  0.75
+one round done, col_idx = 19 quantile =  0.75
+one round done, col_idx = 20 quantile =  0.75
+one round done, col_idx = 21 quantile =  0.75
+one round done, col_idx = 22 quantile =  0.75
+one round done, col_idx = 23 quantile =  0.75
+one round done, col_idx = 24 quantile =  0.75
+one round done, col_idx = 25 quantile =  0.75
+one round done, col_idx = 26 quantile =  0.75
+one round done, col_idx = 27 quantile =  0.75
+one round done, col_idx = 28 quantile =  0.75
+one round done, col_idx = 29 quantile =  0.75
+one round done, col_idx = 30 quantile =  0.75
+one round done, col_idx = 31 quantile =  0.75
+one round done, col_idx = 32 quantile =  0.75
+one round done, col_idx = 33 quantile =  0.75
+one round done, col_idx = 34 quantile =  0.75
+one round done, col_idx = 35 quantile =  0.75
+one round done, col_idx = 36 quantile =  0.75
+one round done, col_idx = 37 quantile =  0.75
+one round done, col_idx = 38 quantile =  0.75
+one round done, col_idx = 39 quantile =  0.75
+one round done, col_idx = 40 quantile =  0.75
+one round done, col_idx = 41 quantile =  0.75
+one round done, col_idx = 42 quantile =  0.75
+one round done, col_idx = 43 quantile =  0.75
+one round done, col_idx = 44 quantile =  0.75
+one round done, col_idx = 45 quantile =  0.75
+one round done, col_idx = 46 quantile =  0.75
+one round done, col_idx = 47 quantile =  0.75
+one round done, col_idx = 48 quantile =  0.75
+one round done, col_idx = 49 quantile =  0.75
+one round done, col_idx = 50 quantile =  0.75
+one round done, col_idx = 51 quantile =  0.75
+one round done, col_idx = 52 quantile =  0.75
+one round done, col_idx = 53 quantile =  0.75
+one round done, col_idx = 54 quantile =  0.75
+one round done, col_idx = 55 quantile =  0.75
+one round done, col_idx = 56 quantile =  0.75
+one round done, col_idx = 57 quantile =  0.75
+one round done, col_idx = 58 quantile =  0.75
+one round done, col_idx = 59 quantile =  0.75
+one round done, col_idx = 60 quantile =  0.75
+one round done, col_idx = 61 quantile =  0.75
+one round done, col_idx = 62 quantile =  0.75
+one round done, col_idx = 63 quantile =  0.75
+one round done, col_idx = 64 quantile =  0.75
+one round done, col_idx = 65 quantile =  0.75
+one round done, col_idx = 66 quantile =  0.75
+one round done, col_idx = 67 quantile =  0.75
+one round done, col_idx = 68 quantile =  0.75
+one round done, col_idx = 69 quantile =  0.75
+one round done, col_idx = 70 quantile =  0.75
+one round done, col_idx = 71 quantile =  0.75
+one round done, col_idx = 72 quantile =  0.75
+one round done, col_idx = 73 quantile =  0.75
+one round done, col_idx = 74 quantile =  0.75
+one round done, col_idx = 75 quantile =  0.75
+one round done, col_idx = 76 quantile =  0.75
+one round done, col_idx = 77 quantile =  0.75
+one round done, col_idx = 78 quantile =  0.75
+one round done, col_idx = 79 quantile =  0.75
+one round done, col_idx = 80 quantile =  0.75
+one round done, col_idx = 81 quantile =  0.75
+one round done, col_idx = 82 quantile =  0.75
+one round done, col_idx = 83 quantile =  0.75
+one round done, col_idx = 84 quantile =  0.75
+one round done, col_idx = 85 quantile =  0.75
+one round done, col_idx = 86 quantile =  0.75
+one round done, col_idx = 87 quantile =  0.75
+one round done, col_idx = 88 quantile =  0.75
+one round done, col_idx = 89 quantile =  0.75
+one round done, col_idx = 90 quantile =  0.75
+one round done, col_idx = 91 quantile =  0.75
+one round done, col_idx = 92 quantile =  0.75
+one round done, col_idx = 93 quantile =  0.75
+one round done, col_idx = 94 quantile =  0.75
+one round done, col_idx = 95 quantile =  0.75
+one round done, col_idx = 96 quantile =  0.75
+one round done, col_idx = 97 quantile =  0.75
+one round done, col_idx = 98 quantile =  0.75
+one round done, col_idx = 99 quantile =  0.75
+one round done, col_idx = 100 quantile =  0.75
+one round done, col_idx = 101 quantile =  0.75
+one round done, col_idx = 102 quantile =  0.75
+one round done, col_idx = 103 quantile =  0.75
+one round done, col_idx = 104 quantile =  0.75
+one round done, col_idx = 105 quantile =  0.75
+one round done, col_idx = 106 quantile =  0.75
+one round done, col_idx = 107 quantile =  0.75
+one round done, col_idx = 108 quantile =  0.75
+one round done, col_idx = 109 quantile =  0.75
+one round done, col_idx = 110 quantile =  0.75
+one round done, col_idx = 111 quantile =  0.75
+one round done, col_idx = 112 quantile =  0.75
+one round done, col_idx = 113 quantile =  0.75
+one round done, col_idx = 114 quantile =  0.75
+one round done, col_idx = 115 quantile =  0.75
+one round done, col_idx = 116 quantile =  0.75
+one round done, col_idx = 117 quantile =  0.75
+one round done, col_idx = 118 quantile =  0.75
+one round done, col_idx = 119 quantile =  0.75
+one round done, col_idx = 120 quantile =  0.75
+one round done, col_idx = 121 quantile =  0.75
+one round done, col_idx = 122 quantile =  0.75
+one round done, col_idx = 123 quantile =  0.75
+one round done, col_idx = 124 quantile =  0.75
+one round done, col_idx = 125 quantile =  0.75
+one round done, col_idx = 126 quantile =  0.75
+one round done, col_idx = 127 quantile =  0.75
+one round done, col_idx = 128 quantile =  0.75
+one round done, col_idx = 129 quantile =  0.75
+one round done, col_idx = 130 quantile =  0.75
+one round done, col_idx = 131 quantile =  0.75
+one round done, col_idx = 132 quantile =  0.75
+one round done, col_idx = 133 quantile =  0.75
+one round done, col_idx = 134 quantile =  0.75
+one round done, col_idx = 135 quantile =  0.75
+one round done, col_idx = 136 quantile =  0.75
+one round done, col_idx = 137 quantile =  0.75
+one round done, col_idx = 138 quantile =  0.75
+one round done, col_idx = 139 quantile =  0.75
+one round done, col_idx = 140 quantile =  0.75
+one round done, col_idx = 141 quantile =  0.75
+one round done, col_idx = 142 quantile =  0.75
+one round done, col_idx = 143 quantile =  0.75
+one round done, col_idx = 144 quantile =  0.75
+one round done, col_idx = 145 quantile =  0.75
+one round done, col_idx = 146 quantile =  0.75
+one round done, col_idx = 147 quantile =  0.75
+one round done, col_idx = 148 quantile =  0.75
+one round done, col_idx = 149 quantile =  0.75
+one round done, col_idx = 150 quantile =  0.75
+one round done, col_idx = 151 quantile =  0.75
+one round done, col_idx = 152 quantile =  0.75
+one round done, col_idx = 153 quantile =  0.75
+one round done, col_idx = 154 quantile =  0.75
+one round done, col_idx = 155 quantile =  0.75
+one round done, col_idx = 156 quantile =  0.75
+one round done, col_idx = 157 quantile =  0.75
+one round done, col_idx = 158 quantile =  0.75
+one round done, col_idx = 159 quantile =  0.75
+one round done, col_idx = 160 quantile =  0.75
+one round done, col_idx = 161 quantile =  0.75
+one round done, col_idx = 162 quantile =  0.75
+one round done, col_idx = 163 quantile =  0.75
+one round done, col_idx = 164 quantile =  0.75
+one round done, col_idx = 165 quantile =  0.75
+one round done, col_idx = 166 quantile =  0.75
+one round done, col_idx = 167 quantile =  0.75
+one round done, col_idx = 168 quantile =  0.75
+one round done, col_idx = 169 quantile =  0.75
+one round done, col_idx = 170 quantile =  0.75
+one round done, col_idx = 171 quantile =  0.75
+one round done, col_idx = 172 quantile =  0.75
+one round done, col_idx = 173 quantile =  0.75
+one round done, col_idx = 174 quantile =  0.75
+one round done, col_idx = 175 quantile =  0.75
+one round done, col_idx = 176 quantile =  0.75
+one round done, col_idx = 177 quantile =  0.75
+one round done, col_idx = 178 quantile =  0.75
+one round done, col_idx = 179 quantile =  0.75
+one round done, col_idx = 180 quantile =  0.75
+one round done, col_idx = 181 quantile =  0.75
+one round done, col_idx = 182 quantile =  0.75
+one round done, col_idx = 183 quantile =  0.75
+one round done, col_idx = 184 quantile =  0.75
+one round done, col_idx = 185 quantile =  0.75
+one round done, col_idx = 186 quantile =  0.75
+one round done, col_idx = 187 quantile =  0.75
+one round done, col_idx = 188 quantile =  0.75
+one round done, col_idx = 189 quantile =  0.75
+one round done, col_idx = 190 quantile =  0.75
+one round done, col_idx = 191 quantile =  0.75
+one round done, col_idx = 192 quantile =  0.75
+one round done, col_idx = 193 quantile =  0.75
+one round done, col_idx = 194 quantile =  0.75
+one round done, col_idx = 195 quantile =  0.75
+one round done, col_idx = 196 quantile =  0.75
+one round done, col_idx = 197 quantile =  0.75
+one round done, col_idx = 198 quantile =  0.75
+one round done, col_idx = 199 quantile =  0.75
+one round done, col_idx = 200 quantile =  0.75
+one round done, col_idx = 201 quantile =  0.75
+one round done, col_idx = 202 quantile =  0.75
+one round done, col_idx = 203 quantile =  0.75
+one round done, col_idx = 204 quantile =  0.75
+one round done, col_idx = 205 quantile =  0.75
+one round done, col_idx = 206 quantile =  0.75
+one round done, col_idx = 207 quantile =  0.75
+one round done, col_idx = 208 quantile =  0.75
+one round done, col_idx = 209 quantile =  0.75
+one round done, col_idx = 210 quantile =  0.75
+one round done, col_idx = 211 quantile =  0.75
+one round done, col_idx = 212 quantile =  0.75
+one round done, col_idx = 213 quantile =  0.75
+one round done, col_idx = 214 quantile =  0.75
+one round done, col_idx = 215 quantile =  0.75
+one round done, col_idx = 216 quantile =  0.75
+one round done, col_idx = 217 quantile =  0.75
+one round done, col_idx = 218 quantile =  0.75
+one round done, col_idx = 219 quantile =  0.75
+one round done, col_idx = 220 quantile =  0.75
+one round done, col_idx = 221 quantile =  0.75
+one round done, col_idx = 222 quantile =  0.75
+one round done, col_idx = 223 quantile =  0.75
+one round done, col_idx = 224 quantile =  0.75
+one round done, col_idx = 225 quantile =  0.75
+one round done, col_idx = 226 quantile =  0.75
+one round done, col_idx = 227 quantile =  0.75
+one round done, col_idx = 228 quantile =  0.75
+one round done, col_idx = 229 quantile =  0.75
+one round done, col_idx = 230 quantile =  0.75
+one round done, col_idx = 231 quantile =  0.75
+one round done, col_idx = 232 quantile =  0.75
+one round done, col_idx = 233 quantile =  0.75
+one round done, col_idx = 234 quantile =  0.75
+one round done, col_idx = 235 quantile =  0.75
+one round done, col_idx = 236 quantile =  0.75
+one round done, col_idx = 237 quantile =  0.75
+one round done, col_idx = 238 quantile =  0.75
+one round done, col_idx = 239 quantile =  0.75
+one round done, col_idx = 240 quantile =  0.75
+one round done, col_idx = 241 quantile =  0.75
+one round done, col_idx = 242 quantile =  0.75
+one round done, col_idx = 243 quantile =  0.75
+one round done, col_idx = 244 quantile =  0.75
+one round done, col_idx = 245 quantile =  0.75
+one round done, col_idx = 246 quantile =  0.75
+one round done, col_idx = 247 quantile =  0.75
+one round done, col_idx = 248 quantile =  0.75
+one round done, col_idx = 249 quantile =  0.75
+one round done, col_idx = 250 quantile =  0.75
+one round done, col_idx = 251 quantile =  0.75
+one round done, col_idx = 252 quantile =  0.75
+one round done, col_idx = 253 quantile =  0.75
+one round done, col_idx = 254 quantile =  0.75
+one round done, col_idx = 255 quantile =  0.75
+one round done, col_idx = 256 quantile =  0.75
+one round done, col_idx = 257 quantile =  0.75
+one round done, col_idx = 258 quantile =  0.75
+one round done, col_idx = 259 quantile =  0.75
+one round done, col_idx = 260 quantile =  0.75
+one round done, col_idx = 261 quantile =  0.75
+Error: cannot allocate vector of size 630 Kb
+Execution halted

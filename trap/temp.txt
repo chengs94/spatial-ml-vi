@@ -1,0 +1,38 @@
+### calculates the likelihood for any normal r.v. using TPRS approx covariance
+
+
+
+spatBas <- .makeSpatBas(pars=list(psill=1,nugget=1),
+                          coords.train=train.coords, coords.test = test.coords,
+                          out.Z = TRUE,
+                          cov.type="TPRS",cov.opts=list(k=0,m=2))
+  R <- spatBas$Zb %*% t(spatBas$Zb)
+  n = dim(R)[1]
+  
+  theta.try = seq(.05, .95, .05)
+  lklhd = NULL
+  for (theta in theta.try){
+    
+    V <- chol(theta * R +  diag(rep(1-theta, n)))
+    i.V = chol2inv(V)
+    
+    beta.hat.pcr <- solve(t(new.x.train) %*% i.V %*% new.x.train,
+                          t(new.x.train) %*% i.V %*% Y.train)
+    mu = c(new.x.train %*% beta.hat.pcr)
+    
+    cur.lklhd <- 2 * sum(log(diag(V))) + 
+      n * log( t(Y.train-mu) %*% i.V %*% (Y.train-mu) / n ) 
+    
+    lklhd = c(lklhd, cur.lklhd)
+  }
+  
+  theta = theta.try[which.min(lklhd)]
+  #loglik = sapply(theta.try, logLikeTPRS, y=Y.train, train.coords=train.coords, x=pc.obj$X)
+  #theta = theta.try[which.min(loglik)]
+  #theta.pls <- pc.pars[,which(num.pcs==cv.pcs.pls$opt.pcs)]
+  
+  V <- chol(theta * R +  diag(rep(1-theta, n)))
+  i.V = chol2inv(V)
+
+  beta.hat.pcr <- solve(t(new.x.train) %*% i.V %*% new.x.train,
+                        t(new.x.train) %*% i.V %*% Y.train)

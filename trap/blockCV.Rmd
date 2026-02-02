@@ -1,0 +1,236 @@
+---
+title: "TRAP models with block and stratified CV"
+author: "Si Cheng"
+date: ' `r Sys.Date()` '
+output: 
+  html_document:
+    number_sections: no
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+## Block and stratified cross-validation: setup
+
+```{r, fig.width=16, fig.height=12}
+library(sf)
+library(blockCV)
+library(ggmap)
+library(grid)
+library(ggplot2)
+library(gridExtra)
+
+dat = readRDS("dat.rda")
+load("folds.rda")
+
+dat$block_fold = as.factor(fold_block)
+dat$strat_fold = as.factor(fold_strat)
+
+seaMap <- get_map(location=c(min(dat$longitude.x), min(dat$latitude.x),
+                             max(dat$longitude.x), max(dat$latitude.x)),
+                 source="stamen", maptype = "terrain", crop=FALSE)
+ #p_block = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  #          geom_point(data = dat, aes(x = longitude.x, y = latitude.x, 
+  #                           color = block_fold), size = 3) + #size = Y.pls
+  #          scale_color_viridis_d(name = "") +
+  #          ggtitle("CV folds: block") + guides(size = FALSE) +
+  #          theme(plot.margin=unit(rep(0,4), "pt"), 
+  #                text = element_text(size = 16))
+p_block = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = dat, aes(x = longitude.x, y = latitude.x, 
+                             color = block_fold), size = 3) + #size = Y.pls
+            scale_color_viridis_d(name = "") +
+            ggtitle("CV folds: block") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+ p_strat = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = dat, aes(x = longitude.x, y = latitude.x, 
+                             color = strat_fold), size = 3) + #size = Y.pls
+            scale_color_viridis_d(name = "") +
+            ggtitle("CV folds: stratified") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), 
+                  text = element_text(size = 16))
+ #p_id = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+#            geom_point(data = dat, aes(x = longitude.x, y = latitude.x, 
+#                             color = id), size = 3) + #size = Y.pls
+#            scale_color_viridis_d(name = "") +
+#            ggtitle("Row id") + guides(size = FALSE) +
+#            theme(plot.margin=unit(rep(0,4), "pt"), 
+#                  text = element_text(size = 16))
+grid.arrange(arrangeGrob(p_block, p_strat, nrow=1))
+```
+
+## CV results
+Unweighted annual average estimates are used for both UFP and BC (the adjusted annual averages are ignored). Key observations:
+
+* Predictions mainly based on TPRS (alone or with RF) are poor in block CV
+* Performance of SpatRF and two-step procedures is close to UK-PLS in stratified CV, but worse than UK-PLS in block CV
+* For block CV, UK-PLS outperforms most models, and common RF outperforms spatRF
+
+```{r}
+load("trap_cv_block.RData")
+combn_ests = function(rslt, varname){
+  # combine estimates
+  for (j in 1:length(rslt)){
+    idx <- !is.na(rslt[[j]]$Y.pls)
+    Y.pls[idx] <- rslt[[j]]$Y.pls[idx]
+    Y.spatrf.cv[idx] <- rslt[[j]]$Y.spatrf.cv[idx]
+    Y.spatrf.pl[idx] <- rslt[[j]]$Y.spatrf.pl[idx]
+    Y.tprs[idx] <- rslt[[j]]$Y.tprs[idx]
+    Y.tprs.rf[idx] <- rslt[[j]]$Y.tprs.rf[idx]
+    Y.rf[idx] <- rslt[[j]]$Y.rf[idx]
+    Y.rf.tprs[idx] <- rslt[[j]]$Y.rf.tprs[idx]
+  }
+  y = dat[,grepl(varname, colnames(dat))]
+  R2.pls = 1 - mean((Y.pls - y)^2)/var(y)
+  R2.spatrf.pl = 1 - mean((Y.spatrf.pl - y)^2)/var(y)
+  R2.spatrf.cv = 1 - mean((Y.spatrf.cv - y)^2)/var(y)
+  R2.tprs = 1 - mean((Y.tprs - y)^2)/var(y)
+  R2.tprs.rf = 1 - mean((Y.tprs.rf - y)^2)/var(y)
+  R2.rf = 1 - mean((Y.rf - y)^2)/var(y)
+  R2.rf.tprs = 1 - mean((Y.rf.tprs - y)^2)/var(y)
+  return(list(Y.pls = Y.pls, 
+              Y.spatrf.pl = Y.spatrf.pl, Y.spatrf.cv = Y.spatrf.cv,
+              Y.tprs = Y.tprs, Y.tprs.rf = Y.tprs.rf, 
+              Y.rf = Y.rf, Y.rf.tprs = Y.rf.tprs,
+              R2.pls = R2.pls, 
+              R2.spatrf.pl = R2.spatrf.pl, R2.spatrf.cv = R2.spatrf.cv,
+              R2.tprs = R2.tprs, R2.tprs.rf = R2.tprs.rf, 
+              R2.rf = R2.rf, R2.rf.tprs = R2.rf.tprs
+              ))
+}
+
+ufp_block = combn_ests(block.ufp.uw, "ufp_uw")
+bc_block = combn_ests(block.bc.uw, "bc_uw")
+ufp_strat = combn_ests(strat.ufp.uw, "ufp_uw")
+bc_strat = combn_ests(strat.bc.uw, "bc_uw")
+
+rslt_table <- matrix(NA, nrow = 4, ncol = 7)
+rownames(rslt_table) <- c("UFP block", "UFP stratified", 
+                          "BC block", "BC stratified")
+colnames(rslt_table) <- c("UK PLS", "SpatRF (PL)","SpatRF (NP)", 
+                          "TPRS", "TPRS-RF", "RF", "RF-TPRS")
+rslt_table[1,] = c(ufp_block$R2.pls, ufp_block$R2.spatrf.pl,
+                   ufp_block$R2.spatrf.cv, ufp_block$R2.tprs,
+                   ufp_block$R2.tprs.rf, ufp_block$R2.rf,
+                   ufp_block$R2.rf.tprs)
+rslt_table[2,] = c(ufp_strat$R2.pls, ufp_strat$R2.spatrf.pl,
+                   ufp_strat$R2.spatrf.cv, ufp_strat$R2.tprs,
+                   ufp_strat$R2.tprs.rf, ufp_strat$R2.rf,
+                   ufp_strat$R2.rf.tprs)
+rslt_table[3,] = c(bc_block$R2.pls, bc_block$R2.spatrf.pl,
+                   bc_block$R2.spatrf.cv, bc_block$R2.tprs,
+                   bc_block$R2.tprs.rf, bc_block$R2.rf,
+                   bc_block$R2.rf.tprs)
+rslt_table[4,] = c(bc_strat$R2.pls, bc_strat$R2.spatrf.pl,
+                   bc_strat$R2.spatrf.cv, bc_strat$R2.tprs,
+                   bc_strat$R2.tprs.rf, bc_strat$R2.rf,
+                   bc_strat$R2.rf.tprs)
+knitr::kable(rslt_table, digits = 2)
+```
+
+## Plots of predictions
+```{r, fig.width=18, fig.height=15}
+seaMap <- get_map(location=c(min(dat$longitude.x), min(dat$latitude.x),
+                            max(dat$longitude.x), max(dat$latitude.x)),
+                 source="stamen", maptype = "terrain", crop=FALSE)
+seaMap2 <- get_map(location=c(min(dat$longitude.x), min(dat$latitude.x),
+                            max(dat$longitude.x), max(dat$latitude.x)),
+                   source = "stamen", maptype = "watercolor", crop=FALSE)
+plot_rslt = function(mod, varname, title){
+  datsub = dat[,c(1:3,5:16)]
+  datsub$Y.pls = mod$Y.pls
+  datsub$Y.spatrf.pl = mod$Y.spatrf.pl
+  datsub$Y.spatrf.cv = mod$Y.spatrf.cv
+  datsub$Y.rf = mod$Y.rf
+  datsub$Y.tprs = mod$Y.tprs
+  datsub$Y.rf.tprs = mod$Y.rf.tprs
+  datsub$Y.tprs.rf = mod$Y.tprs.rf
+  
+  datsub$obs = datsub[,grepl(varname, colnames(datsub))]
+  datsub$res.pls = mod$Y.pls - datsub$obs
+  datsub$res.spatrf.pl = mod$Y.spatrf.pl - datsub$obs
+  datsub$res.spatrf.cv = mod$Y.spatrf.cv - datsub$obs
+  datsub$res.rf = mod$Y.rf - datsub$obs
+  datsub$res.tprs = mod$Y.tprs - datsub$obs
+  datsub$res.rf.tprs = mod$Y.rf.tprs - datsub$obs
+  datsub$res.tprs.rf = mod$Y.tprs.rf - datsub$obs
+  
+  lower = min(c(datsub$obs, datsub$Y.pls, datsub$Y.spatrf.pl, datsub$Y.spatrf.cv,
+                datsub$Y.rf, datsub$Y.tprs,
+                datsub$Y.rf.tprs, datsub$Y.tprs.rf))
+  upper = max(c(datsub$obs, datsub$Y.pls, datsub$Y.spatrf.pl, datsub$Y.spatrf.cv,
+                datsub$Y.rf, datsub$Y.tprs,
+                datsub$Y.rf.tprs, datsub$Y.tprs.rf))
+  
+  p_obs = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+                             color = obs, size = obs)) +
+            scale_color_viridis_c(option = "plasma", name = "",
+                                  limits = c(lower, upper)) +# + upper)) + 
+            guides(size = FALSE) + ggtitle("Observed") +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  p_pls = ggmap(seaMap2) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.pls, size = Y.pls)) +
+            scale_color_viridis_c(option = "plasma", name = "", 
+                                  limits = c(lower, upper)) +
+            ggtitle("UK PLS") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  p_spatrf.pl = ggmap(seaMap2) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.spatrf.pl, size = Y.spatrf.pl)) +
+            scale_color_viridis_c(option = "plasma", name = "", 
+                                  limits = c(lower, upper)) +
+            ggtitle("spatRF PL") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  p_spatrf.cv = ggmap(seaMap2) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.spatrf.cv, size = Y.spatrf.cv)) +
+            scale_color_viridis_c(option = "plasma", name = "", 
+                                  limits = c(lower, upper)) +
+            ggtitle("spatRF CV") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  p_rf = ggmap(seaMap2) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.rf, size = Y.rf)) +
+            scale_color_viridis_c(option = "plasma", name = "", 
+                                  limits = c(lower, upper)) +
+            ggtitle("RF (indep)") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  p_tprs = ggmap(seaMap2) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.tprs, size = Y.tprs)) +
+            scale_color_viridis_c(option = "plasma", name = "", 
+                                  limits = c(lower, upper)) +
+            ggtitle("TPRS") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  p_tprs.rf = ggmap(seaMap2) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.tprs.rf, size = Y.tprs.rf)) +
+            scale_color_viridis_c(option = "plasma", name = "", 
+                                  limits = c(lower, upper)) +
+            ggtitle("TPRS-RF") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  p_rf.tprs = ggmap(seaMap2) + labs(x = "longitude", y = "latitude") +
+            geom_point(data = datsub, aes(x = longitude.x, y = latitude.x, 
+                             color = Y.rf.tprs, size = Y.rf.tprs)) +
+            scale_color_viridis_c(option = "plasma", name = "", 
+                                  limits = c(lower, upper)) +
+            ggtitle("RF-TPRS") + guides(size = FALSE) +
+            theme(plot.margin=unit(rep(0,4), "pt"), text = element_text(size = 16))
+  
+  grid.arrange(arrangeGrob(p_obs, p_pls, p_spatrf.pl, p_spatrf.cv,
+                           p_rf, p_tprs, p_tprs.rf, p_rf.tprs,
+                           nrow=2),
+               top = textGrob(title,gp=gpar(fontsize=30)))
+}
+plot_rslt(ufp_block, "ufp_uw", "UFP block")
+plot_rslt(ufp_strat, "ufp_uw", "UFP stratified")
+plot_rslt(bc_block, "bc_uw", "BC block")
+plot_rslt(bc_strat, "bc_uw", "BC stratified")
+```

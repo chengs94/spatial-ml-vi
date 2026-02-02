@@ -1,0 +1,340 @@
+---
+title: "Difference in predictions vs covariates with top contributions"
+author: "Si Cheng"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+### Difference in grid predictions: spatial RF vs UK-PLS
+
+```{r, fig.width=8, fig.height=6}
+library(sf)
+library(ggmap)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+
+load("rslt_grid_uw_mean.RData")
+grid.bc.uw.mean = grid.bc.uw
+grid.ufp.uw.mean = grid.ufp.uw
+load("rslt_grid_uw2.RData")
+pls.bc.uw.mean = grid.bc.uw
+pls.ufp.uw.mean = grid.ufp.uw
+load("rslt_grid_uw.RData")
+grid.bc.uw$Y.pls.mean = pls.bc.uw.mean$Y.pls.mean
+grid.ufp.uw$Y.pls.mean = pls.ufp.uw.mean$Y.pls.mean
+grid.bc.uw$Y.pls.cov = pls.bc.uw.mean$Y.pls - pls.bc.uw.mean$Y.pls.mean
+grid.ufp.uw$Y.pls.cov = pls.ufp.uw.mean$Y.pls - pls.ufp.uw.mean$Y.pls.mean
+project_crs <- 4326
+study_area_shp <- read_sf("oval_shp/oval_around_monitoring_area.shp") %>% 
+  st_transform(project_crs)
+
+grid_covars_shp <- cov_grid %>%
+  st_as_sf(., coords=c("longitude","latitude"), remove = FALSE,
+           crs=project_crs)
+grid_covars_shp$in_study_area <- st_intersects(grid_covars_shp, study_area_shp,
+                                               sparse = FALSE) %>%
+  apply(., 1, any)
+
+
+seaMap <- get_map(location=c(min(cov_grid$longitude), min(cov_grid$latitude),
+                             max(cov_grid$longitude), max(cov_grid$latitude)),
+                  source="stamen", maptype = "terrain", crop=FALSE)
+
+temp = data.frame(longitude.x = cov_grid$longitude[grid_covars_shp$in_study_area], 
+                  latitude.x = cov_grid$latitude[grid_covars_shp$in_study_area],
+                  Y.diff.ufp = exp(grid.ufp.uw$Y.spatrf.pl[grid_covars_shp$in_study_area]) - 
+                    exp(grid.ufp.uw$Y.pls[grid_covars_shp$in_study_area]),
+                  Y.diff.bc = exp(grid.bc.uw$Y.spatrf.pl[grid_covars_shp$in_study_area]) - 
+                    exp(grid.bc.uw$Y.pls[grid_covars_shp$in_study_area]))
+
+p1 = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                              color = Y.diff.ufp)) + #size = Y.pls
+  scale_color_gradient2(mid = "white", name = "") +
+  ggtitle("UFP") + guides(size = FALSE) +
+  theme(plot.margin=unit(rep(0,4), "pt"), 
+        text = element_text(size = 16))
+
+p2 = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  geom_point(data = temp, aes(x = longitude.x, y = latitude.x, 
+                              color = Y.diff.bc)) + #size = Y.pls
+  scale_color_gradient2(mid = "white", name = "") +
+  ggtitle("BC") + guides(size = FALSE) +
+  theme(plot.margin=unit(rep(0,4), "pt"), 
+        text = element_text(size = 16))
+
+grid.arrange(arrangeGrob(p1, p2, nrow=1),
+               top = textGrob("Difference in predictions: SpatRF vs UK-PLS", 
+                              gp=gpar(fontsize=20,font=3)))
+```
+
+### Predictors with the greatest variable importance differences: 
+
+```{r, fig.width=20, fig.height=8}
+p.a1 = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  geom_point(data = grid_covars_shp[grid_covars_shp$in_study_area,], 
+             aes(x = longitude, y = latitude, 
+                 color = ll_a1_s01500)) + 
+  scale_color_viridis_c(name = "") +
+  ggtitle("A1 road length") + guides(size = FALSE) +
+  theme(plot.margin=unit(rep(0,4), "pt"), 
+        text = element_text(size = 16))
+
+p.tl = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  geom_point(data = grid_covars_shp[grid_covars_shp$in_study_area,], 
+             aes(x = longitude, y = latitude, 
+                 color = tl_s10000)) + 
+  scale_color_viridis_c(name = "") +
+  ggtitle("Truck route length") + guides(size = FALSE) +
+  theme(plot.margin=unit(rep(0,4), "pt"), 
+        text = element_text(size = 16))
+
+p.da1a3 = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  geom_point(data = grid_covars_shp[grid_covars_shp$in_study_area,], 
+             aes(x = longitude, y = latitude, 
+                 color = log_m_to_a1_a3_intersect)) + 
+  scale_color_viridis_c(name = "") +
+  ggtitle("Log dist to A1/A3 intersection") + guides(size = FALSE) +
+  theme(plot.margin=unit(rep(0,4), "pt"), 
+        text = element_text(size = 16))
+
+p.dairp = ggmap(seaMap) + labs(x = "longitude", y = "latitude") +
+  geom_point(data = grid_covars_shp[grid_covars_shp$in_study_area,], 
+             aes(x = longitude, y = latitude, 
+                 color = log_m_to_l_airp)) + 
+  scale_color_viridis_c(name = "") +
+  ggtitle("Log dist to large airport") + guides(size = FALSE) +
+  theme(plot.margin=unit(rep(0,4), "pt"), 
+        text = element_text(size = 16))
+
+ggpubr::ggarrange(p.a1, p.tl, p.da1a3, p.dairp, nrow=1, ncol = 4, 
+                  common.legend = FALSE, legend = "bottom")
+
+```
+
+### Prediction differences vs covariate values
+
+```{r, fig.width=12, fig.height=10}
+grid_covars_shp$ufp.diff = exp(grid.ufp.uw$Y.spatrf.pl) - exp(grid.ufp.uw$Y.pls)
+
+# par(mfrow = c(2,2))
+# plot(grid_covars_shp[grid_covars_shp$in_study_area,]$ll_a1_s01500,
+#      grid_covars_shp[grid_covars_shp$in_study_area,]$ufp.diff,
+#      xlab = "A1 road length", ylab = "Diff in UFP predictions", pch = 19)
+# plot(grid_covars_shp[grid_covars_shp$in_study_area,]$tl_s10000,
+#      grid_covars_shp[grid_covars_shp$in_study_area,]$ufp.diff,
+#      xlab = "Truck route length", ylab = "Diff in UFP predictions", pch = 19)
+# plot(grid_covars_shp[grid_covars_shp$in_study_area,]$log_m_to_a1_a3_intersect,
+#      grid_covars_shp[grid_covars_shp$in_study_area,]$ufp.diff,
+#      xlab = "Log dist to A1/A3 intersection", 
+#      ylab = "Diff in UFP predictions", pch = 19)
+# plot(grid_covars_shp[grid_covars_shp$in_study_area,]$log_m_to_l_airp,
+#      grid_covars_shp[grid_covars_shp$in_study_area,]$ufp.diff,
+#      xlab = "Log dist to large airport", 
+#      ylab = "Diff in UFP predictions", pch = 19)
+
+p1 = ggplot(grid_covars_shp[grid_covars_shp$in_study_area,],
+       aes(x = ll_a1_s01500, y = ufp.diff)) + geom_hex() +
+        scale_fill_viridis_c(name = "Count") +
+  geom_smooth(method = "loess") +
+  labs(x = "A1 road length", y = "Difference in UFP predictions")
+p2 = ggplot(grid_covars_shp[grid_covars_shp$in_study_area,],
+       aes(x = tl_s10000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Truck route length", y = "Difference in UFP predictions")
+p3 = ggplot(grid_covars_shp[grid_covars_shp$in_study_area,],
+       aes(x = log_m_to_a1_a3_intersect, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Log distance to A1/A3 intersection", y = "Difference in UFP predictions")
+p4 = ggplot(grid_covars_shp[grid_covars_shp$in_study_area,],
+       aes(x = log_m_to_l_airp, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Log distance to large airport", y = "Difference in UFP predictions")
+p5 = ggplot(grid_covars_shp[grid_covars_shp$in_study_area,],
+       aes(x = pop10_s05000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Population", y = "Difference in UFP predictions")
+p6 = ggplot(grid_covars_shp[grid_covars_shp$in_study_area,],
+       aes(x = log_m_to_a1_a1_intersect, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Log distance to A1/A1 intersection", y = "Difference in UFP predictions")
+p7 = ggplot(grid_covars_shp[grid_covars_shp$in_study_area,],
+       aes(x = rlu_dev_hi_p05000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Highly developed land use", y = "Difference in UFP predictions")
+p8 = ggplot(grid_covars_shp[grid_covars_shp$in_study_area,],
+       aes(x = rlu_evergreen_p03000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Evergreen forest land", y = "Difference in UFP predictions")
+p9 = ggplot(grid_covars_shp[grid_covars_shp$in_study_area,],
+       aes(x = ndvi_q75_a05000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "NDVI", y = "Difference in UFP predictions")
+	
+ggpubr::ggarrange(p1,p3,p6,p2,p4,p5,p7,p8,p9, nrow = 3, ncol = 3, common.legend = TRUE, legend = "right")
+```
+
+Hexbin plots at the cohort locations:
+```{r}
+library(tidyverse)
+
+cohort_pred = read.csv("cohort_pred_cov_anonym.csv") %>%
+  mutate(ufp.diff = exp(ufp_spatrf_pl) - exp(ufp_pls))
+
+p1 = ggplot(cohort_pred,
+       aes(x = ll_a1_s01500, y = ufp.diff)) + geom_hex() +
+        scale_fill_viridis_c(name = "Count") +
+  geom_smooth(method = "loess") +
+  labs(x = "A1 road length", y = "Difference in UFP predictions")
+p2 = ggplot(cohort_pred,
+       aes(x = tl_s10000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Truck route length", y = "Difference in UFP predictions")
+p3 = ggplot(cohort_pred,
+       aes(x = log_m_to_a1_a3_intersect, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Log distance to A1/A3 intersection", y = "Difference in UFP predictions")
+p4 = ggplot(cohort_pred,
+       aes(x = log_m_to_l_airp, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Log distance to large airport", y = "Difference in UFP predictions")
+p5 = ggplot(cohort_pred,
+       aes(x = pop10_s05000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Population", y = "Difference in UFP predictions")
+p6 = ggplot(cohort_pred,
+       aes(x = log_m_to_a1_a1_intersect, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Log distance to A1/A1 intersection", y = "Difference in UFP predictions")
+p7 = ggplot(cohort_pred,
+       aes(x = rlu_dev_hi_p05000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Highly developed land use", y = "Difference in UFP predictions")
+p8 = ggplot(cohort_pred,
+       aes(x = rlu_evergreen_p03000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Evergreen forest land", y = "Difference in UFP predictions")
+p9 = ggplot(cohort_pred,
+       aes(x = ndvi_q75_a05000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "NDVI", y = "Difference in UFP predictions")
+	
+ggpubr::ggarrange(p1,p3,p6,p2,p4,p5,p7,p8,p9, nrow = 3, ncol = 3, common.legend = TRUE, legend = "right")
+```
+
+```{r}
+p1 = ggplot(cohort_pred,
+       aes(x = ll_a1_s01500, y = ufp.diff)) + geom_hex() +
+        scale_fill_viridis_c(name = "Count") +
+  geom_smooth(method = "loess") +
+  labs(x = "A1 road length", y = "Difference in UFP predictions")
+p2 = ggplot(cohort_pred,
+       aes(x = tl_s01500, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Truck route length", y = "Difference in UFP predictions")
+p3 = ggplot(cohort_pred,
+       aes(x = log_m_to_a1_a3_intersect, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Log distance to A1/A3 intersection", y = "Difference in UFP predictions")
+p4 = ggplot(cohort_pred,
+       aes(x = log_m_to_l_airp, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Log distance to large airport", y = "Difference in UFP predictions")
+p5 = ggplot(cohort_pred,
+       aes(x = log_m_to_m_port, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Log distance to medium port", y = "Difference in UFP predictions")
+p6 = ggplot(cohort_pred,
+       aes(x = log_m_to_a1_a1_intersect, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Log distance to A1/A1 intersection", y = "Difference in UFP predictions")
+p7 = ggplot(cohort_pred,
+       aes(x = rlu_water_p01000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Land use: water", y = "Difference in UFP predictions")
+p8 = ggplot(cohort_pred,
+       aes(x = log_m_to_truck, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Log distance to truck route", y = "Difference in UFP predictions")
+p9 = ggplot(cohort_pred,
+       aes(x = rlu_dev_med_p03000, y = ufp.diff)) + geom_hex() +
+  scale_fill_viridis_c(name = "") +
+  geom_smooth(method = "loess") +
+  labs(x = "Land use: developed medium intensity", y = "Difference in UFP predictions")
+	
+ggpubr::ggarrange(p1,p2,p6,p3,p8,p4,p5,p7,p9, 
+                  nrow = 3, ncol = 3, common.legend = TRUE, legend = "right")
+```
+
+### (Previous) top differences in variable importance
+```{r}
+
+dat = readRDS("dat.rda")
+X = dat[,-(1:21)]
+
+load("varimp_new/varimp_cohort_diff.RData")
+
+cols = 1:ncol(X)
+qs = c(.125, .25, .375, .5, .625, .75, .875)
+
+avg.pls = avg.spatrf = avg.rf = avg.rf.tprs = matrix(NA, ncol = length(qs), nrow = ncol(X))
+k = 1
+
+for (i in 1:length(cols)){
+  for (j in 1:length(qs)){
+    avg.pls[i,j] = mean(exp(pred.diff[[k]]$Y.pls))
+    avg.spatrf[i,j] = mean(exp(pred.diff[[k]]$Y.spatrf.pl))
+    avg.rf[i,j] = mean(exp(pred.diff[[k]]$Y.rf))
+    avg.rf.tprs[i,j] = mean(exp(pred.diff[[k]]$Y.rf.tprs))
+    k = k + 1
+  }
+}
+
+vim_25_50 = cbind((avg.pls[,4]) - (avg.pls[,2]), 
+              (avg.spatrf[,4]) - (avg.spatrf[,2])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), varname = colnames(X))
+vim_50_75 = cbind((avg.pls[,6]) - (avg.pls[,4]), 
+              (avg.spatrf[,6]) - (avg.spatrf[,4])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), varname = colnames(X))
+vim_25_75 = cbind((avg.pls[,6]) - (avg.pls[,2]), 
+              (avg.spatrf[,6]) - (avg.spatrf[,2])) %>% #scale() %>%
+  as.data.frame() %>% mutate(diff = abs(V2 - V1), varname = colnames(X))
+
+vim_25_50 %>% top_n(diff, n = 10) %>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "25% to 50% quantile, UFP")
+vim_50_75 %>% top_n(diff, n = 10)%>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "50% to 75% quantile, UFP")
+vim_25_75 %>% top_n(diff, n = 10) %>% 
+  knitr::kable(col.names = c("PLS", "SpatRF", "abs(difference)", "Variable"),
+               caption = "25% to 75% quantile, UFP")
+```

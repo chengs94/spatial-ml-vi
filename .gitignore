@@ -1,0 +1,11 @@
+
+# irrelevant, redundant or non-public files
+manuscript/
+data/
+progress summaries/
+presentation/
+shared_with_group/
+
+*.pdf
+*.docx
+*.csv

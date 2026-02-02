@@ -1,0 +1,1 @@
+{"frames":[{"func":"read.csv(\"cohort_pred_cov_anonym.csv\") %>% mutate(ufp.diff = exp(ufp_spatrf_pl) - \n    exp(ufp_pls))","file":"","line_number":0,"end_line_number":0,"character_number":0,"end_character_number":0}],"message":"Error in mutate(., ufp.diff = exp(ufp_spatrf_pl) - exp(ufp_pls)) : \n  could not find function \"mutate\"\n"}
