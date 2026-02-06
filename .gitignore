@@ -1,4 +1,53 @@
+# Generated Outputs
+*.html
+*.Rout
+*.jpeg
+*.png
+*.pdf
+*.tiff
+*.csh
+*.sh
+*.pbs
+*.sbatch
 
+# DATA FILES - Non-Public Data
+*.rda
+*.RData
+data/
+*/data/
+raw_data/
+*/raw_data/
+
+# R Environment
+.DS_Store
+.Rhistory
+.Rproj.user/
+.Rproj.user
+*.Rproj
+.Renviron
+.Rprofile
+
+# Experimental
+*/old/
+*/pca/
+*/varimp_new/
+*/var_decomp/
+*_temp/
+*_scratch/
+
+# System
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.pyc
+.conda/
+.venv/
+venv/
 
 # irrelevant, redundant or non-public files
 manuscript/
