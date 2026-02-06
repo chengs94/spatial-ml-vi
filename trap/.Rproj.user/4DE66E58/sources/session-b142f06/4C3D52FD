@@ -3,17 +3,17 @@
     "path": "~/Library/CloudStorage/OneDrive-UW/exposurepred/national/national_model.Rmd",
     "project_path": null,
     "type": "r_markdown",
-    "hash": "0",
+    "hash": "4230665895",
     "contents": "",
-    "dirty": false,
+    "dirty": true,
     "created": 1674849065027.0,
     "source_on_save": false,
     "relative_order": 8,
     "properties": {
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "266,8",
-        "scrollLine": "0",
+        "cursorPosition": "16,82",
+        "scrollLine": "15",
         "last_setup_crc32": ""
     },
     "folds": "",
@@ -21,7 +21,7 @@
     "encoding": "ISO8859-1",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1675122879463,
+    "last_content_update": 1770360689902,
     "read_only": false,
     "read_only_alternatives": []
 }

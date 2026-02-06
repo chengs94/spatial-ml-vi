@@ -29,7 +29,7 @@ set.seed(3)
 
 plltnt.mat <- read.csv("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/data/Si.txt")
 plltnt.mat <- plltnt.mat[-which(plltnt.mat$native_id=="PHOE5"),]
-# annavg.si <- plltnt.mat[,2]
+
 X <- plltnt.mat[,c(14:25,27:613)]
 X.active <- X %>% select(m_to_a1, pop_dens, ndvi_q50_a01000,
                          lu_mix_urban_p15000, lu_resi_p15000)
@@ -105,10 +105,6 @@ make_plot = function(use.residual = FALSE, transformed = c("sqrt", "log", "none"
     maptype = "toner-lite" #has airport symbol
   #maptype = "toner-background" #roads & water but no airport
   ))
-  # usMap = get_map(location=c(min(coords$longitude), min(coords$latitude),
-  #                           max(coords$longitude), max(coords$latitude)),
-  #                source="stamen", maptype = "toner", crop=FALSE)
-  # #, maptype = "terrain", color = "bw", force = TRUE)
 
   p = ggmap(usMap, darken = c(.5, "white")) + 
          geom_jitter(data = dt, 
@@ -168,7 +164,6 @@ for (j in 1:length(rslt)){
   Y.tprs.rf[idx] = rslt[[j]]$Y.tprs.rf[idx]
 }
 Y.pls[Y.pls < 0] = 0
-# Y.pls[Y.pls > 15] = 15
 
 r2 = matrix(c(1 - mean((Y.pls - annavg)^2)/var(annavg),
               1 - mean((Y.spatrf.pl - annavg)^2)/var(annavg),
@@ -306,13 +301,6 @@ ggarrange(varimp1, varimp2, widths = c(4,1),
 ```
 
 ```{r, fig.width=16, fig.height = 16}
-
-# temp = colnames(X)[grepl("lu_", colnames(X))]
-# ll = NULL
-# temp2 = strsplit(temp, "_p")
-# for (j in 1:length(temp2))
-#   ll = c(ll, paste(temp2[[j]][1][1], "_p", sep = ""))
-# ll = unique(ll)
 
 varimp3 = plotImp2(cbind((avg.pls[,2]) - (avg.pls[,1]),
               (avg.spatrf[,2]) - (avg.spatrf[,1]),

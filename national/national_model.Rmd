@@ -13,21 +13,21 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message = FALSE)
-# load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/spatialRF/spatRF_replicate3.RData")
-load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/seeds3_ec_all_full.RData")
+
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/3_ec_all_full.RData")
 rslt.ec = rslt
 annavg.ec = annavg
 plltnt.ec = plltnt.mat
-# load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/spatialRF/spatRF_replicate3_oc_full.RData")
-load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/seeds3_oc_all.RData")
+
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/3_oc_all.RData")
 rslt.oc = rslt
 annavg.oc = annavg
-# load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/spatialRF/spatRF_replicate3_s_full.RData")
-load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/seeds3_s_all_full.RData")
+
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/3_s_all_full.RData")
 rslt.s = rslt
 annavg.s = annavg
 plltnt.s = plltnt.mat
-load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/seeds3_si_all.RData")
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/spatialRF/3_si_all.RData")
 rslt.si = rslt
 annavg.si = annavg
 rm(rslt, annavg)
@@ -429,13 +429,8 @@ plot_res(annavg.si, Y.pls.si, Y.spatrf.pl.si, Y.spatrf.cv.si,
 
 ```{r, fig.width=10, fig.height = 12}
 library(tidyverse)
-# load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/national/national_ec_spatRF.RData")
-# rslt.spatrf = rslt
-# 
-# load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/national/national_ec_pls_rf.RData")
-# rslt.pls = rslt
 
-load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/national/varimp_seed3_ec_full.RData")
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/national/varimp_3_ec_full.RData")
 
 cols = 1:ncol(X)
 qs = c(.25, .5, .75)
@@ -708,7 +703,7 @@ plotImp2(cbind((avg.pls[,2]) - (avg.pls[,1]),
 ### OC
 ```{r, fig.width=10, fig.height = 12}
 
-load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/national/varimp_seed3_oc.RData")
+load("/Users/sicheng/Library/CloudStorage/OneDrive-UW/exposurepred/national/varimp_3_oc.RData")
 
 cols = 1:ncol(X)
 qs = c(.25, .5, .75)
@@ -782,8 +777,8 @@ plotImp2(cbind((avg.pls[,2]) - (avg.pls[,1]),
 ### S
 
 ```{r, fig.width=10, fig.height = 12}
-load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/national/varimp_seed3_s.RData")
-# rslt.s = rslt.oc # wrong name in my original code!
+load("C:/Users/Si Cheng/Dropbox (Personal)/exposurepred/national/varimp_3_s.RData")
+
 rm(rslt.oc)
 
 cols = 1:ncol(X)
